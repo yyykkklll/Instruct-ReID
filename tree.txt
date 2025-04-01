@@ -1,0 +1,26 @@
++---.idea
+|   \---inspectionProfiles
++---bert-base-uncased
++---cuhk_pedes
+|   +---annotations
+|   +---images
+|   |   \---CUHK03
+|   \---splits
++---examples
+|   \---logs
++---logs
+|   \---pretrained
++---reid
+|   +---bert-base-uncased
+|   +---datasets
+|   |   \---data
+|   +---evaluation
+|   +---loss
+|   +---models
+|   |   +---backbone
+|   |   |   \---modules
+|   |   \---layers
+|   +---multi_tasks_utils
+|   +---trainer
+|   \---utils
+\---scripts

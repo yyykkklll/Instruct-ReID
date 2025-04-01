@@ -1,0 +1,5 @@
+# 忽略数据集
+cuhk_pedes/
+logs/
+vit_model/
+reid/bert-base-uncased
