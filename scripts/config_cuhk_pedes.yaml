@@ -1,6 +1,6 @@
 albef_pretrained: 'logs/pretrained/ALBEF.pth'
 vit_pretrained: 'logs/pretrained/pass_vit_base_full.pth'
-batch_size: 128
+batch_size: 32
 fp16: True
 height: 224  # ViT 要求 224x224
 width: 224   # ViT 要求 224x224

@@ -1,7 +1,8 @@
 from __future__ import absolute_import
 
-from .adv_loss import ClothesBasedAdversarialLoss, CosFaceLoss
+from .adv_loss import InfoNCELoss, CosFaceLoss  # 移除 ClothesBasedAdversarialLoss
+
 __all__ = [
-    'ClothesBasedAdversarialLoss',
+    'InfoNCELoss',
     'CosFaceLoss'
 ]

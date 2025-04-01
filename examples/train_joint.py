@@ -49,7 +49,6 @@ def configuration():
     parser.add_argument('--bert-base-path', type=str, default='bert-base-uncased')
     working_dir = osp.dirname(osp.abspath(__file__))
     parser.add_argument('--logs-dir', type=str, default=osp.join(working_dir, 'logs'))
-    parser.add_argument('--vit-pretrained', type=str, default='logs/pretrained/pass_vit_base_full.pth')
 
     args = parser.parse_args()
     command_line_args = vars(args).copy()
@@ -63,15 +62,6 @@ def configuration():
             setattr(args, k, v)
 
     args.local_rank = int(os.environ.get('LOCAL_RANK', -1)) if args.local_rank is None else args.local_rank
-    args.root = os.path.abspath(args.root)
-    args.train_list = os.path.abspath(args.train_list)
-    args.query_list = os.path.abspath(args.query_list)
-    args.gallery_list = os.path.abspath(args.gallery_list)
-    args.logs_dir = os.path.abspath(args.logs_dir)
-    args.vit_pretrained = os.path.abspath(args.vit_pretrained)
-    args.config = os.path.abspath(args.config)
-    args.data_config['json_file'] = os.path.abspath(args.data_config['json_file'])
-
     args.img_size = (args.height, args.width)
     args.task_name = 't2i'
 
@@ -129,8 +119,6 @@ class Runner:
 
         # 模型
         model = T2IReIDModel(num_classes=num_classes, net_config=args)
-        if os.path.exists(args.vit_pretrained):
-            model.load_param(args.vit_pretrained)
         model = self.distributed(model)
 
         # 优化器和调度器

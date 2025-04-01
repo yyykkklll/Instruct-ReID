@@ -1,5 +1,4 @@
 import os
-
 import torch
 from reid.loss.adv_loss import InfoNCELoss, CosFaceLoss
 
@@ -23,16 +22,30 @@ class T2IReIDTrainer:
 
         # 前向传播
         with torch.amp.autocast('cuda', enabled=self.args.fp16):
-            outputs = self.model(image=image, instruction=caption, label=pid, task_info=self.task_info)
-            loss_dict = outputs
+            loss_dict, image_feats, text_feats, fused_feats = self.model(image=image, instruction=caption, label=pid,
+                                                                         task_info=self.task_info)
+
+            # 确保 image_feats 和 text_feats 是二维张量
+            if image_feats is not None:
+                while image_feats.dim() > 2:
+                    image_feats = image_feats.squeeze()
+            if text_feats is not None:
+                while text_feats.dim() > 2:
+                    text_feats = text_feats.squeeze()
 
             # 添加 InfoNCE 损失
-            fused_feats = self.model(image, caption)  # 获取融合特征
-            loss_dict['info_nce_loss'] = self.info_nce_loss(fused_feats, fused_feats)  # 简化，实际应分开图像和文本特征
+            if image_feats is not None and text_feats is not None:
+                # 确保形状为 [batch_size, feat_dim]
+                if image_feats.shape[0] != self.args.batch_size:
+                    image_feats = image_feats.mT  # 从 [feat_dim, batch_size] 转置为 [batch_size, feat_dim]
+                if text_feats.shape[0] != self.args.batch_size:
+                    text_feats = text_feats.mT  # 从 [feat_dim, batch_size] 转置为 [batch_size, feat_dim]
+                loss_dict['info_nce_loss'] = self.info_nce_loss(image_feats, text_feats)
 
             # 可选：添加 CosFace 损失
-            logits = self.model.classifier(fused_feats)
-            loss_dict['cosface_loss'] = self.cosface_loss(logits, pid)
+            if fused_feats is not None:
+                logits = self.model.classifier(fused_feats)
+                loss_dict['cosface_loss'] = self.cosface_loss(logits, pid)
 
         return loss_dict
 

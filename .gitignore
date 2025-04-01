@@ -1,5 +1,5 @@
 # 忽略数据集
 cuhk_pedes/
 logs/
-vit_model/
+vit-base-patch16-224/
 reid/bert-base-uncased
