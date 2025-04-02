@@ -60,8 +60,14 @@ class T2IReIDModel(nn.Module):
 
         # 文本特征 (BERT)
         if instruction is not None:
-            instruction_text = self.tokenizer(instruction, padding='max_length', max_length=70,
-                                              return_tensors="pt").to(device)
+            # 修改：增加 max_length，设置 truncation=True 和 padding=True
+            instruction_text = self.tokenizer(
+                instruction,
+                padding='max_length',
+                max_length=100,  # 增加到 100
+                truncation=True,  # 启用截断
+                return_tensors="pt"
+            ).to(device)
             text_outputs = self.text_encoder(**instruction_text)
             text_embeds = text_outputs.last_hidden_state[:, 0, :]  # [batch, 768], [CLS] token
             # 确保 text_embeds 是二维张量

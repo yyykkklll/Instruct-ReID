@@ -1,5 +1,6 @@
 from __future__ import print_function, absolute_import
 import json
+import os
 import os.path as osp
 import shutil
 
@@ -29,9 +30,8 @@ def save_checkpoint(state, is_best=False, fpath='checkpoint.pth.tar'):
 
 
 def load_checkpoint(fpath):
-    if osp.isfile(fpath):
-        # checkpoint = torch.load(fpath)
-        checkpoint = torch.load(fpath, map_location=torch.device('cpu'))
+    if os.path.isfile(fpath):
+        checkpoint = torch.load(fpath, map_location=torch.device('cpu'), weights_only=True)
         print("=> Loaded checkpoint '{}'".format(fpath))
         return checkpoint
     else:

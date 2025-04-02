@@ -53,6 +53,10 @@ class T2IReIDTrainer:
         self.model.train()
         for epoch in range(1, self.args.epochs + 1):
             total_loss = 0
+            total_info_nce_loss = 0  # 记录 InfoNCE 损失
+            total_cosface_loss = 0   # 记录 CosFace 损失
+            batch_count = 0          # 记录有效批次数量
+
             for i, inputs in enumerate(train_loader):
                 optimizer.zero_grad()
                 loss_dict = self.run(inputs)
@@ -67,10 +71,22 @@ class T2IReIDTrainer:
                     optimizer.step()
 
                 total_loss += loss.item()
+                # 累加 InfoNCE 和 CosFace 损失
+                if 'info_nce_loss' in loss_dict:
+                    total_info_nce_loss += loss_dict['info_nce_loss'].item()
+                if 'cosface_loss' in loss_dict:
+                    total_cosface_loss += loss_dict['cosface_loss'].item()
+                batch_count += 1
 
+                # 每 print_freq 批次打印一次信息
                 if i % self.args.print_freq == 0:
                     avg_loss = total_loss / (i + 1)
-                    print(f"Epoch {epoch}, Batch {i}/{len(train_loader)}, Loss: {avg_loss:.4f}, "
+                    avg_info_nce_loss = total_info_nce_loss / batch_count if batch_count > 0 else 0
+                    avg_cosface_loss = total_cosface_loss / batch_count if batch_count > 0 else 0
+                    print(f"Epoch {epoch}, Batch {i}/{len(train_loader)}, "
+                          f"Loss: {avg_loss:.4f}, "
+                          f"InfoNCE: {avg_info_nce_loss:.4f}, "
+                          f"CosFace: {avg_cosface_loss:.4f}, "
                           f"LR: {optimizer.param_groups[0]['lr']:.6f}")
 
             lr_scheduler.step()

@@ -37,14 +37,14 @@ def configuration():
     parser.add_argument('--height', type=int, default=224)
     parser.add_argument('--width', type=int, default=224)  # ViT 需要 224x224
     parser.add_argument('--local_rank', type=int, default=None)
-    parser.add_argument('--lr', type=float, default=0.00035)
+    parser.add_argument('--lr', type=float, default=0.00010)
     parser.add_argument('--weight-decay', type=float, default=5e-4)
-    parser.add_argument('--warmup-step', type=int, default=1000)
+    parser.add_argument('--warmup-step', type=int, default=2000)
     parser.add_argument('--milestones', nargs='+', type=int, default=[7000, 14000])
-    parser.add_argument('--epochs', type=int, default=20)  # 替换 iters
+    parser.add_argument('--epochs', type=int, default=80)  # 替换 iters
     parser.add_argument('--seed', type=int, default=1)
     parser.add_argument('--print-freq', type=int, default=50)
-    parser.add_argument('--save-freq', type=int, default=5)
+    parser.add_argument('--save-freq', type=int, default=10)
     parser.add_argument('--fp16', action='store_true')
     parser.add_argument('--bert-base-path', type=str, default='bert-base-uncased')
     working_dir = osp.dirname(osp.abspath(__file__))

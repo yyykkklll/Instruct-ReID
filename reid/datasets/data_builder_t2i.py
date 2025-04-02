@@ -4,9 +4,8 @@ import torchvision.transforms as transforms
 from PIL import Image
 from torch.utils.data import Dataset, DataLoader
 import json
+import numpy as np
 
-
-import os
 
 def merge_sub_datasets(train_list, train_root_list, args):
     if not isinstance(train_list, list):
@@ -20,9 +19,9 @@ def merge_sub_datasets(train_list, train_root_list, args):
 
     assert len(task_list) == len(task_pref), "Number of datasets and roots must match"
 
-    global_pid_list = {}
-    global_pid_counter = 0
     list_lines_all = []
+    global_pid_list = {}  # 用于映射 pid 到 [0, num_classes-1]
+    global_pid_counter = 0
 
     # 加载文本描述
     json_file = args.data_config.get('json_file', '')
@@ -36,28 +35,32 @@ def merge_sub_datasets(train_list, train_root_list, args):
             lines = f.readlines()
             for line in lines:
                 info = line.strip('\n').split(" ")
-                # 判断是否为 query 文件
-                if 'query' in list_file:
-                    imgs = info[1].split('_')[0]  # 移除 _0 或 _1 后缀
-                    clothes = info[0]
-                else:
-                    imgs = info[0]
-                    clothes = info[1]
-                pids = info[2]
-                view_id = info[3] if len(info) > 3 else "0"
-                cam_id = info[4] if len(info) > 4 else "0"
+                # 新格式：img_path pid cam_id
+                imgs = info[0]
+                pids = info[1]
+                cam_id = info[2]
+                # 映射 pid 到 [0, num_classes-1]
                 if pids not in global_pid_list:
                     global_pid_list[pids] = global_pid_counter
                     global_pid_counter += 1
-                pids = global_pid_list[pids]
+                mapped_pid = global_pid_list[pids]
+                view_id = "0"  # 默认值，CUHK-PEDES 不使用 view_id
                 # 从 attr_dict 获取真实文本描述
-                entry = attr_dict.get(imgs, {"caption": f"Person with ID {pids}", "id": pids})
+                # 移除后缀（如果有）
+                img_key = imgs
+                if img_key.endswith('_0') or img_key.endswith('_1'):
+                    img_key = img_key.rsplit('_', 1)[0]
+                entry = attr_dict.get(img_key, {"caption": f"Person with ID {pids}", "id": pids})
                 caption = entry["caption"]
                 # 确保路径格式正确
                 imgs = imgs.replace('\\', '/')
+                if not imgs.endswith(('.png', '.jpg', '.jpeg')):
+                    imgs += '.png'
                 full_path = os.path.join(prefix, imgs).replace('\\', '/')
-                list_lines_all.append((full_path, caption, pids, view_id, cam_id))
+                list_lines_all.append((full_path, caption, mapped_pid, view_id, cam_id))
 
+    # 保存 global_pid_list 供后续使用（例如测试时）
+    args.global_pid_list = global_pid_list
     return list_lines_all
 
 
@@ -65,16 +68,16 @@ class DataBuilder_t2i:
     def __init__(self, args, is_distributed=False):
         self.args = args
         self.root = args.root
-        self.train_list = args.train_list
+        self.train_list = getattr(args, 'train_list', None)
         self.query_list = args.query_list
         self.gallery_list = args.gallery_list
         self.is_distributed = is_distributed
-        self.json_file = args.data_config.get('json_file', '')  # 从配置中获取 JSON 文件路径
+        self.json_file = args.data_config.get('json_file', '')
 
     def _load_data(self, list_lines):
         data = []
         for img_path, caption, person_id, view_id, cam_id in list_lines:
-            person_id = int(person_id)
+            person_id = int(person_id)  # 已经是映射后的值
             cam_id = int(cam_id)
             data.append((img_path, caption, person_id, cam_id))
         return data
@@ -96,8 +99,9 @@ class DataBuilder_t2i:
                 try:
                     image = Image.open(img_path).convert('RGB')
                 except Exception as e:
-                    print(f"Warning: Failed to load image {img_path}, using zero tensor: {e}")
-                    image = torch.zeros((3, self.args.height, self.args.width))
+                    print(f"Warning: Failed to load image {img_path}, using zero image: {e}")
+                    image_array = np.zeros((self.args.height, self.args.width, 3), dtype=np.uint8)
+                    image = Image.fromarray(image_array)
 
                 if self.transform is not None:
                     image = self.transform(image)
@@ -140,13 +144,22 @@ class DataBuilder_t2i:
 
     def _build_test_loader(self, data, is_query=False):
         dataset = self.build_dataset(data, is_train=False)
+
+        def collate_fn(batch):
+            images, captions, pids, cam_ids = zip(*batch)
+            images = torch.stack(images, dim=0)
+            pids = torch.stack(pids, dim=0)
+            cam_ids = torch.stack(cam_ids, dim=0)
+            return images, captions, pids, cam_ids
+
         test_loader = DataLoader(
             dataset,
             batch_size=self.args.batch_size,
             shuffle=False,
             num_workers=self.args.workers,
             pin_memory=True,
-            drop_last=False
+            drop_last=False,
+            collate_fn=collate_fn
         )
         return test_loader
 
