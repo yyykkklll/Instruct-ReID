@@ -1,6 +1,11 @@
-+---.idea
-|   \---inspectionProfiles
-+---bert-base-uncased
++---CUHK-SYSU
+|   +---annotation
+|   |   \---test
+|   |       +---subset
+|   |       \---train_test
+|   +---Image
+|   |   \---SSM
+|   \---processed
 +---cuhk_pedes
 |   +---annotations
 |   +---images
@@ -13,14 +18,25 @@
 +---reid
 |   +---bert-base-uncased
 |   +---datasets
-|   |   \---data
+|   |   +---data
+|   |   \---__pycache__
 |   +---evaluation
+|   |   \---__pycache__
 |   +---loss
+|   |   \---__pycache__
 |   +---models
 |   |   +---backbone
 |   |   |   \---modules
-|   |   \---layers
+|   |   +---layers
+|   |   \---__pycache__
 |   +---multi_tasks_utils
 |   +---trainer
-|   \---utils
-\---scripts
+|   |   \---__pycache__
+|   +---utils
+|   |   \---__pycache__
+|   \---__pycache__
++---scripts
+\---vit-base-patch16-224
+    \---.cache
+        \---huggingface
+            \---download
