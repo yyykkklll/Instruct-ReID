@@ -111,12 +111,23 @@ class DataBuilder_t2i:
 
                 return image, caption, pid_tensor, cam_id_tensor
 
-        transform = transforms.Compose([
-            transforms.Resize((self.args.height, self.args.width)),
-            transforms.RandomHorizontalFlip() if is_train else transforms.Lambda(lambda x: x),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-        ])
+        # 定义训练和测试的 transform
+        if is_train:
+            transform = transforms.Compose([
+                transforms.Resize((self.args.height + 32, self.args.width + 32)),  # 稍微放大以便随机裁剪
+                transforms.RandomCrop((self.args.height, self.args.width), padding=4),  # 随机裁剪
+                transforms.RandomHorizontalFlip(p=0.5),  # 随机水平翻转
+                transforms.RandomRotation(degrees=10),  # 随机旋转，幅度较小
+                transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),  # 颜色抖动
+                transforms.ToTensor(),
+                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+            ])
+        else:
+            transform = transforms.Compose([
+                transforms.Resize((self.args.height, self.args.width)),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+            ])
 
         dataset = CUHKPEDESDataset(data, self.args, transform=transform)
         return dataset
