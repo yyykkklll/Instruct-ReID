@@ -1,65 +1,101 @@
+import json
 import os
+
 import torch
 import torchvision.transforms as transforms
 from PIL import Image
 from torch.utils.data import Dataset, DataLoader
-import json
-import numpy as np
 
 
-def merge_sub_datasets(train_list, train_root_list, args):
-    if not isinstance(train_list, list):
-        task_list = [train_list]
-    else:
-        task_list = train_list
-    if not isinstance(train_root_list, list):
-        task_pref = [train_root_list]
-    else:
-        task_pref = train_root_list
-
-    assert len(task_list) == len(task_pref), "Number of datasets and roots must match"
-
+def merge_sub_datasets(dataset_configs, args):
+    """
+    合并多个数据集（如CUHK-PEDES、ICFG-PEDES、RSTPReid），生成统一的数据列表。
+    dataset_configs: 列表，包含每个数据集的配置（名称、根目录、标注文件）。
+    """
     list_lines_all = []
-    global_pid_list = {}  # 用于映射 pid 到 [0, num_classes-1]
+    global_pid_list = {}  # 映射原始 pid 到连续的 [0, num_classes-1]
     global_pid_counter = 0
 
-    # 加载文本描述
-    json_file = args.data_config.get('json_file', '')
-    if not os.path.exists(json_file):
-        raise FileNotFoundError(f"JSON file not found at: {json_file}")
-    with open(json_file, 'r', encoding='utf-8') as f:
-        attr_dict = json.load(f)
+    for config in dataset_configs:
+        dataset_name = config['name']
+        prefix = config['root']
+        json_file = config.get('json_file', '')
 
-    for list_file, prefix in zip(task_list, task_pref):
-        with open(list_file) as f:
-            lines = f.readlines()
-            for line in lines:
-                info = line.strip('\n').split(" ")
-                # 新格式：img_path pid cam_id
-                imgs = info[0]
-                pids = info[1]
-                cam_id = info[2]
-                # 映射 pid 到 [0, num_classes-1]
-                if pids not in global_pid_list:
-                    global_pid_list[pids] = global_pid_counter
-                    global_pid_counter += 1
-                mapped_pid = global_pid_list[pids]
-                view_id = "0"  # 默认值，CUHK-PEDES 不使用 view_id
-                # 从 attr_dict 获取真实文本描述
-                # 移除后缀（如果有）
-                img_key = imgs
-                if img_key.endswith('_0') or img_key.endswith('_1'):
-                    img_key = img_key.rsplit('_', 1)[0]
-                entry = attr_dict.get(img_key, {"caption": f"Person with ID {pids}", "id": pids})
-                caption = entry["caption"]
-                # 确保路径格式正确
-                imgs = imgs.replace('\\', '/')
-                if not imgs.endswith(('.png', '.jpg', '.jpeg')):
-                    imgs += '.png'
-                full_path = os.path.join(prefix, imgs).replace('\\', '/')
-                list_lines_all.append((full_path, caption, mapped_pid, view_id, cam_id))
+        # 加载文本描述
+        if not os.path.exists(json_file):
+            raise FileNotFoundError(f"JSON file not found for {dataset_name} at: {json_file}")
+        with open(json_file, 'r', encoding='utf-8') as f:
+            attr_dict_raw = json.load(f)
 
-    # 保存 global_pid_list 供后续使用（例如测试时）
+        # 从 JSON 中提取数据
+        train_lines = []
+        query_lines = []
+        gallery_lines = []
+
+        for item in attr_dict_raw:
+            # 根据数据集类型获取图像路径和描述
+            if dataset_name == "CUHK-PEDES":
+                img_path = item['file_path']
+                pid = str(item['id'])
+                caption = item['captions'][0]  # 选择第一个 caption
+            elif dataset_name == "ICFG-PEDES":
+                img_path = item['file_path']
+                pid = str(item['id'])
+                caption = item['captions'][0]  # 只有一个 caption
+            elif dataset_name == "RSTPReid":
+                img_path = item['img_path']
+                pid = str(item['id'])
+                caption = item['captions'][0]  # 选择第一个 caption
+            else:
+                raise ValueError(f"Unsupported dataset: {dataset_name}")
+
+            # 映射 pid 到连续值
+            if pid not in global_pid_list:
+                global_pid_list[pid] = global_pid_counter
+                global_pid_counter += 1
+            mapped_pid = global_pid_list[pid]
+
+            # 默认 cam_id（文件树中无明确相机信息）
+            cam_id = "0"
+
+            # 规范化图像路径
+            full_path = os.path.join(prefix, img_path).replace('\\', '/')
+            if not full_path.endswith(('.png', '.jpg', '.jpeg')):
+                full_path += '.jpg'  # 默认扩展名
+
+            # 根据路径或 split 划分训练/测试
+            if dataset_name == "CUHK-PEDES":
+                if 'train_query' in img_path:
+                    train_lines.append((full_path, caption, mapped_pid, cam_id))
+                elif 'test_query' in img_path:
+                    query_lines.append((full_path, caption, mapped_pid, cam_id))
+                else:
+                    gallery_lines.append((full_path, caption, mapped_pid, cam_id))
+            elif dataset_name == "ICFG-PEDES":
+                split = item.get('split', 'test')
+                if split == 'train':
+                    train_lines.append((full_path, caption, mapped_pid, cam_id))
+                elif split == 'test':
+                    query_lines.append((full_path, caption, mapped_pid, cam_id))
+                else:
+                    gallery_lines.append((full_path, caption, mapped_pid, cam_id))
+            elif dataset_name == "RSTPReid":
+                split = item.get('split', 'test')
+                if split == 'train':
+                    train_lines.append((full_path, caption, mapped_pid, cam_id))
+                elif split == 'test':
+                    query_lines.append((full_path, caption, mapped_pid, cam_id))
+                else:
+                    gallery_lines.append((full_path, caption, mapped_pid, cam_id))
+
+        # 根据 is_train 参数返回
+        if hasattr(args, 'is_train') and args.is_train:
+            list_lines_all.extend(train_lines)
+        else:
+            list_lines_all.extend(query_lines + gallery_lines)
+            args.query_data = query_lines
+            args.gallery_data = gallery_lines
+
     args.global_pid_list = global_pid_list
     return list_lines_all
 
@@ -67,23 +103,17 @@ def merge_sub_datasets(train_list, train_root_list, args):
 class DataBuilder_t2i:
     def __init__(self, args, is_distributed=False):
         self.args = args
-        self.root = args.root
-        self.train_list = getattr(args, 'train_list', None)
-        self.query_list = args.query_list
-        self.gallery_list = args.gallery_list
         self.is_distributed = is_distributed
-        self.json_file = args.data_config.get('json_file', '')
+        self.dataset_configs = args.dataset_configs  # 期望为包含多个数据集配置的列表
 
     def _load_data(self, list_lines):
         data = []
-        for img_path, caption, person_id, view_id, cam_id in list_lines:
-            person_id = int(person_id)  # 已经是映射后的值
-            cam_id = int(cam_id)
-            data.append((img_path, caption, person_id, cam_id))
+        for img_path, caption, person_id, cam_id in list_lines:
+            data.append((img_path, caption, int(person_id), int(cam_id)))
         return data
 
     def build_dataset(self, data, is_train=False):
-        class CUHKPEDESDataset(Dataset):
+        class T2IReIDDataset(Dataset):
             def __init__(self, data, args, transform=None):
                 self.data = data
                 self.args = args
@@ -99,26 +129,22 @@ class DataBuilder_t2i:
                 try:
                     image = Image.open(img_path).convert('RGB')
                 except Exception as e:
-                    print(f"Warning: Failed to load image {img_path}, using zero image: {e}")
-                    image_array = np.zeros((self.args.height, self.args.width, 3), dtype=np.uint8)
-                    image = Image.fromarray(image_array)
+                    print(f"Warning: Failed to load image {img_path}: {e}")
+                    image_array = torch.zeros(3, self.args.height, self.args.width)
+                    image = Image.fromarray(image_array.numpy(), mode='RGB')
 
                 if self.transform is not None:
                     image = self.transform(image)
 
-                pid_tensor = torch.tensor(pid, dtype=torch.long)
-                cam_id_tensor = torch.tensor(cam_id, dtype=torch.long)
+                return image, caption, torch.tensor(pid, dtype=torch.long), torch.tensor(cam_id, dtype=torch.long)
 
-                return image, caption, pid_tensor, cam_id_tensor
-
-        # 定义训练和测试的 transform
+        # 定义变换
         if is_train:
             transform = transforms.Compose([
-                transforms.Resize((self.args.height + 32, self.args.width + 32)),  # 稍微放大以便随机裁剪
-                transforms.RandomCrop((self.args.height, self.args.width), padding=4),  # 随机裁剪
-                transforms.RandomHorizontalFlip(p=0.5),  # 随机水平翻转
-                transforms.RandomRotation(degrees=10),  # 随机旋转，幅度较小
-                transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),  # 颜色抖动
+                transforms.Resize((self.args.height, self.args.width)),
+                transforms.RandomCrop((self.args.height, self.args.width), padding=4),
+                transforms.RandomHorizontalFlip(p=0.5),
+                transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
                 transforms.ToTensor(),
                 transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
             ])
@@ -129,8 +155,7 @@ class DataBuilder_t2i:
                 transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
             ])
 
-        dataset = CUHKPEDESDataset(data, self.args, transform=transform)
-        return dataset
+        return T2IReIDDataset(data, self.args, transform=transform)
 
     def _build_train_loader(self, data):
         dataset = self.build_dataset(data, is_train=True)
@@ -175,8 +200,9 @@ class DataBuilder_t2i:
         return test_loader
 
     def build_data(self, is_train=False):
+        self.args.is_train = is_train
         if is_train:
-            list_lines = merge_sub_datasets(self.train_list, self.root, self.args)
+            list_lines = merge_sub_datasets(self.dataset_configs, self.args)
             data = self._load_data(list_lines)
             print("Dataset statistics:")
             print("  ------------------------------------------")
@@ -190,10 +216,9 @@ class DataBuilder_t2i:
             print("  ------------------------------------------")
             return self._build_train_loader(data)
         else:
-            list_lines = merge_sub_datasets(self.query_list, self.root, self.args)
-            query_data = self._load_data(list_lines)
-            list_lines = merge_sub_datasets(self.gallery_list, self.root, self.args)
-            gallery_data = self._load_data(list_lines)
+            list_lines = merge_sub_datasets(self.dataset_configs, self.args)
+            query_data = self._load_data(self.args.query_data)
+            gallery_data = self._load_data(self.args.gallery_data)
             query_loader = self._build_test_loader(query_data, is_query=True)
             gallery_loader = self._build_test_loader(gallery_data, is_query=False)
             return query_loader, gallery_loader

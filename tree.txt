@@ -1,40 +1,36 @@
-+---CUHK-SYSU
-|   +---annotation
-|   |   \---test
-|   |       +---subset
-|   |       \---train_test
-|   +---Image
-|   |   \---SSM
-|   \---processed
-+---cuhk_pedes
-|   +---annotations
-|   +---images
-|   |   \---CUHK03
-|   \---splits
++---CUHK-PEDES
+|   \---imgs
+|       +---cam_a
+|       +---cam_b
+|       +---CUHK01
+|       +---CUHK03
+|       +---Market
+|       +---test_query
+|       \---train_query
 +---examples
 |   \---logs
++---ICFG-PEDES
+|   +---imgs
+|   |   +---test
+|   |   \---train
+|   \---processed_data
 +---logs
 |   \---pretrained
 +---reid
 |   +---bert-base-uncased
 |   +---datasets
 |   |   +---data
-|   |   \---__pycache__
 |   +---evaluation
-|   |   \---__pycache__
 |   +---loss
-|   |   \---__pycache__
 |   +---models
 |   |   +---backbone
 |   |   |   \---modules
 |   |   +---layers
-|   |   \---__pycache__
 |   +---multi_tasks_utils
 |   +---trainer
-|   |   \---__pycache__
 |   +---utils
-|   |   \---__pycache__
-|   \---__pycache__
++---RSTPReid
+|   \---imgs
 +---scripts
 \---vit-base-patch16-224
     \---.cache

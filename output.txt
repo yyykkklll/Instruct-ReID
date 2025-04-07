@@ -1,0 +1,120 @@
++---CUHK-PEDES
+|   |   .DS_Store
+|   |   caption_all.json
+|   |   readme.txt
+|   |   \---inspectionProfiles
+|   |           profiles_settings.xml
+|   |           Project_Default.xml
+|   |           
+|   \---imgs
+|       +---cam_a
+|	+---cam_a
+|       +---CUHK03
+|       +---CUHK03
+|       +---Market
+|       +---test_query
+|       \---train_query               
++---examples
+|   |   check_dataset.py
+|   |   evaluate.py
+|   |   test_joint.py
+|   |   train_joint.py
+|   \---logs
++---ICFG-PDES
+|   |   ICFG-PEDES.json
+|   +---imgs
+|   |   +---test
+|   |   \---train
+|   \---processed_data
+|           data_message
+|           ind2word.pkl
+|           test_save.pkl
+|           train_save.pkl      
++---logs
+|   |   check_checkpoint.py
+|   +---cuhk_pedes
+|   |       log.txt  
+|   \---pretrained
+|           ALBEF.pth
+|           pass_vit_base_full.pth
+|           
++---reid
+|   |   __init__.py
+|   |   
+|   +---bert-base-uncased
+|   |       added_tokens.json
+|   |       config.json
+|   |       pytorch_model.bin
+|   |       special_tokens_map.json
+|   |       vocab.txt
+|   |       
+|   +---datasets
+|   |   |   data_builder_t2i.py
+|   |   |   image_layer.py
+|   |   |   image_layer_multi.py
+|   |   |   __init__.py
+|   |   |   
+|   |   +---data
+|   |   |       base_dataset.py
+|   |   |       preprocessor_t2i.py
+|   |   |       sampler.py
+|   |   |       transforms.py
+|   |   |       __init__.py
+|   +---evaluation
+|   |   |   evaluators_t.py
+|   |   |   __init__.py
+|   +---loss
+|   |   |   adv_loss.py
+|   |   |   __init__.py  
+|   +---models
+|   |   |   pass_transformer_joint.py
+|   |   |   tokenization_bert.py
+|   |   |   xbert.py
+|   |   |   __init__.py
+|   |   |   
+|   |   +---backbone
+|   |   |   |   ckpt.py
+|   |   |   |   pass_vit.py
+|   |   |   |   vit_albef.py
+|   |   |   |   vit_albef_ori.py
+|   |   |   |   __init__.py
+|   |   |   |   
+|   |   |   \---modules
+|   |   |           __init__.py
+|   |   |           
+|   |   +---layers
+|   |   |       __init__.py
+|   +---multi_tasks_utils
+|   |       multi_task_distributed_utils.py
+|   |       multi_task_distributed_utils_pt.py
+|   |       __init__.py
+|   |       
+|   +---trainer
+|   |   |   base_trainer.py
+|   |   |   pass_trainer.py
+|   |   |   pass_trainer_joint.py
+|   |   |   __init__.py
+|   +---utils
+|   |   |   comm_.py
+|   |   |   distributed_utils.py
+|   |   |   distributed_utils_pt.py
+|   |   |   logging.py
+|   |   |   lr_scheduler.py
+|   |   |   meters.py
+|   |   |   osutils.py
+|   |   |   serialization.py
+|   |   |   vit_rollout.py
+|   |   |   __init__.py
+|   +---vit-base-patch16-224
+|   |       config.json
+|   |       preprocessor_config.json
+|   |       pytorch_model.bin
+|   |       tf_model.h5
++---RSTPReid
+|   |   data_captions.json
+|   \---imgs
+\---scripts
+        config_cuhk_pedes.yaml
+        test.sh
+        train.sh
+        

@@ -13,7 +13,7 @@ from reid.datasets.data_builder_t2i import DataBuilder_t2i
 from reid.evaluation.evaluators_t import Evaluator_t2i
 from reid.models.pass_transformer_joint import T2IReIDModel
 from reid.utils.logging import Logger
-from reid.utils.serialization import load_checkpoint, copy_state_dict
+from reid.utils.serialization import load_checkpoint
 
 
 def main_worker(args):
@@ -26,27 +26,83 @@ def main_worker(args):
     data_builder = DataBuilder_t2i(args)
     query_loader, gallery_loader = data_builder.build_data(is_train=False)
 
+    # 打印数据加载信息
+    print(f"Query dataset size: {len(query_loader.dataset)}")
+    print(f"Gallery dataset size: {len(gallery_loader.dataset)}")
+    for batch in query_loader:
+        images, captions, pids, cam_ids = batch  # 解包元组
+        print(f"Query batch shape - images: {images.shape}, pids: {pids.shape}, captions: {len(captions)} items")
+        break
+    for batch in gallery_loader:
+        images, captions, pids, cam_ids = batch  # 解包元组
+        print(f"Gallery batch shape - images: {images.shape}, pids: {pids.shape}, captions: {len(captions)} items")
+        break
+
+    # 检查查询和图库的样本路径是否有交集
+    query_paths = set(item[0] for item in query_loader.dataset.data)
+    gallery_paths = set(item[0] for item in gallery_loader.dataset.data)
+    common_paths = query_paths.intersection(gallery_paths)
+    print(f"Number of common image paths between query and gallery: {len(common_paths)}")
+    if len(common_paths) > 0:
+        print(f"Sample common paths (first 5): {list(common_paths)[:5]}")
+
+    # 加载训练集（显式指定 train_list）
+    args.train_list = r'D:\Instruct-ReID\cuhk_pedes\splits\train_t2i_v2.txt'  # 假设训练集文件为 train_t2i.txt
+    data_builder = DataBuilder_t2i(args)  # 重新创建 data_builder，确保 train_list 被设置
+    train_loader, _ = data_builder.build_data(is_train=True)  # 解包元组，忽略 val_loader
+    print(f"Train dataset size: {len(train_loader.dataset)}")
+
+    # 检查训练集与测试集的交集
+    train_paths = set(item[0] for item in train_loader.dataset.data)
+    train_query_common = train_paths.intersection(query_paths)
+    train_gallery_common = train_paths.intersection(gallery_paths)
+    print(f"Number of common image paths between train and query: {len(train_query_common)}")
+    print(f"Number of common image paths between train and gallery: {len(train_gallery_common)}")
+    if len(train_query_common) > 0:
+        print(f"Sample common paths (train vs query, first 5): {list(train_query_common)[:5]}")
+    if len(train_gallery_common) > 0:
+        print(f"Sample common paths (train vs gallery, first 5): {list(train_gallery_common)[:5]}")
+
+    # 在 main_worker 函数中，添加身份检查
+    # 检查训练集与测试集的身份交集
+    train_pids = set(item[2] for item in train_loader.dataset.data)
+    query_pids = set(item[2] for item in query_loader.dataset.data)
+    gallery_pids = set(item[2] for item in gallery_loader.dataset.data)
+    train_query_pid_common = train_pids.intersection(query_pids)
+    train_gallery_pid_common = train_pids.intersection(gallery_pids)
+    print(f"Number of common PIDs between train and query: {len(train_query_pid_common)}")
+    print(f"Number of common PIDs between train and gallery: {len(train_gallery_pid_common)}")
+    if len(train_query_pid_common) > 0:
+        print(f"Sample common PIDs (train vs query, first 5): {list(train_query_pid_common)[:5]}")
+    if len(train_gallery_pid_common) > 0:
+        print(f"Sample common PIDs (train vs gallery, first 5): {list(train_gallery_pid_common)[:5]}")
+
     # 模型
-    # 固定 num_classes 为训练时的值
-    num_classes = 781  # 训练时的身份数量
+    num_classes = 781  # CUHK03的身份数量
     print(f"Number of classes (fixed): {num_classes}")
     model = T2IReIDModel(num_classes=num_classes, net_config=args)
 
     # 加载检查点
     checkpoint = load_checkpoint(args.resume)
-    # 提取 state_dict
     if isinstance(checkpoint, dict) and 'model' in checkpoint:
         state_dict = checkpoint['model']
     elif isinstance(checkpoint, dict) and 'state_dict' in checkpoint:
         state_dict = checkpoint['state_dict']
     else:
-        state_dict = checkpoint  # 假设 checkpoint 本身是 state_dict
+        state_dict = checkpoint  # 假设检查点本身是state_dict
 
     # 打印 state_dict 和模型参数名，检查是否匹配
     print("State dict keys (first 5):", list(state_dict.keys())[:5])
     print("Model state dict keys (first 5):", list(model.state_dict().keys())[:5])
 
-    copy_state_dict(state_dict, model, strip='module.')
+    # 过滤不匹配的权重
+    model_dict = model.state_dict()
+    filtered_state_dict = {k: v for k, v in state_dict.items() if k in model_dict and v.shape == model_dict[k].shape}
+    missing_keys = [k for k in model_dict.keys() if k not in filtered_state_dict]
+    print(f"Missing keys in state_dict: {missing_keys}")
+    model_dict.update(filtered_state_dict)
+    model.load_state_dict(model_dict, strict=False)  # 允许部分加载
+    print("Loaded checkpoint with partial weight matching.")
 
     model = nn.DataParallel(model)
     model.eval()
