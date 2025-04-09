@@ -1,0 +1,18 @@
+vit_pretrained: "pretrained/vit-base-patch16-224" # 改为目录路径，去掉 .pth
+batch_size: 64
+fp16: True
+height: 224
+width: 224
+epochs: 80
+lr: 0.001
+milestones: [35, 60]
+optimizer: "Adam"
+scheduler: "step_lr"
+warmup_step: 1000
+weight_decay: 0.0005
+workers: 0
+json_file: "data/CUHK-PEDES/annotations/caption_all.json"
+bert_base_path: "pretrained/bert-base-uncased"
+print_freq: 50
+save_freq: 10
+logs_dir: "logs"

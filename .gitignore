@@ -1,7 +1,6 @@
 # 忽略数据集
-CUHK-PEDES/
+data/CUHK-PEDES/
+data/RSTPReid
+data/ICFG-PEDES
 logs/
-reid/vit-base-patch16-224
-reid/bert-base-uncased
-RSTPReid/
-ICFG-PEDES/
+pretrained/
