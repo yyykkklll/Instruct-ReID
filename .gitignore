@@ -1,6 +1,0 @@
-# 忽略数据集
-data/CUHK-PEDES/
-data/RSTPReid
-data/ICFG-PEDES
-logs/
-pretrained/
