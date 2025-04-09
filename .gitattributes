@@ -1,0 +1,16 @@
+# Markdown 文件统一为 LF
+*.md text eol=lf
+
+# 文本文件统一为 CRLF（比如 tree.txt）
+*.txt text eol=crlf
+
+# Python、JavaScript、HTML 等代码文件统一为 LF
+*.py  text eol=lf
+*.js  text eol=lf
+*.ts  text eol=lf
+*.java text eol=lf
+*.html text eol=lf
+*.css  text eol=lf
+
+# 默认行为：所有文本文件使用 LF（可选）
+* text=auto
