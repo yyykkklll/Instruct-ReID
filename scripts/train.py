@@ -55,9 +55,7 @@ def configuration():
     else:
         args.dataset_configs = [{'name': 'CUHK-PEDES', 'root': 'data/CUHK-PEDES/imgs', 'json_file': 'data/CUHK-PEDES/annotations/caption_all.json'}]
 
-    # 修正路径为绝对路径
     args.bert_base_path = os.path.join(ROOT_DIR, args.bert_base_path.lstrip('./'))
-    # 将 vit_pretrained 转换为目录路径
     args.vit_pretrained = os.path.join(ROOT_DIR, args.vit_pretrained.lstrip('./').replace('.pth', ''))
     if not os.path.exists(args.bert_base_path):
         raise FileNotFoundError(f"BERT base path not found at: {args.bert_base_path}")
@@ -94,10 +92,11 @@ class Runner:
             gc.collect()
 
         os.makedirs(args.logs_dir, exist_ok=True)
-        log_file = os.path.join(args.logs_dir, 'log.txt')
+        log_file = os.path.join(args.logs_dir, 'train_log.txt')
         logging.basicConfig(
             level=logging.INFO,
-            format='%(asctime)s - %(message)s',
+            format='%(message)s (%(asctime)s)',  # 将时间移到后面
+            datefmt='%Y-%m-%d %H:%M:%S',     # 自定义时间格式
             handlers=[
                 logging.FileHandler(log_file),
                 logging.StreamHandler(sys.stdout)
@@ -120,19 +119,11 @@ class Runner:
         lr_scheduler = self.build_scheduler(optimizer)
 
         trainer = T2IReIDTrainer(model, args)
-        trainer.train(train_loader, optimizer, lr_scheduler)
+        trainer.train(train_loader, optimizer, lr_scheduler, query_loader, query_loader.dataset.data, gallery_loader.dataset.data)
 
-        checkpoint_path = os.path.join(args.logs_dir, 'checkpoint_epoch_final.pth')
-        torch.save({'state_dict': model.state_dict()}, checkpoint_path)
-        logger.info(f"Model saved at: {checkpoint_path}")
-
-        from src.evaluation.evaluators_t import Evaluator_t2i
-        model.load_param(checkpoint_path)
-        evaluator = Evaluator_t2i(model)
-        metrics = evaluator.evaluate(query_loader, gallery_loader, query_loader.dataset.data,
-                                     gallery_loader.dataset.data)
-        logger.info("Evaluation Results:")
-        logger.info(metrics)
+        final_checkpoint_path = os.path.join(args.logs_dir, 'checkpoint_epoch_final.pth')
+        torch.save({'state_dict': model.state_dict()}, final_checkpoint_path)
+        logger.info(f"Final model saved at: {final_checkpoint_path}")
 
 
 if __name__ == '__main__':

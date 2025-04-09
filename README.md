@@ -137,10 +137,10 @@ CUHK-PEDES:
 CUDA_VISIBLE_DEVICES=6 python scripts/evaluate.py --config configs/config_cuhk_pedes.yaml --root data/CUHK-PEDES --dataset-configs "{'name': 'CUHK-PEDES', 'root': 'data/CUHK-PEDES/imgs', 'json_file': 'data/CUHK-PEDES/annotations/caption_all.json'}" --checkpoint logs/cuhk_pedes/checkpoint_epoch_final.pth --batch-size 128 --workers 0 --fp16
 
 ICFG-PEDES:
-CUDA_VISIBLE_DEVICES=6 python scripts/evaluate.py --config configs/config_cuhk_pedes.yaml --root data/ICFG-PEDES --dataset-configs "{'name': 'ICFG-PEDES', 'root': 'data/ICFG-PEDES/imgs', 'json_file': 'data/ICFG-PEDES/ICFG-PEDES.json'}" --checkpoint logs/icfg_pedes/checkpoint_epoch_final.pth --batch-size 128 --workers 0 --fp16
+CUDA_VISIBLE_DEVICES=6 python scripts/evaluate.py --config configs/config_cuhk_pedes.yaml --root data/ICFG-PEDES --dataset-configs "{'name': 'ICFG-PEDES', 'root': 'data/ICFG-PEDES/imgs', 'json_file': 'data/ICFG-PEDES/annotations/ICFG-PEDES.json'}" --checkpoint logs/icfg_pedes/checkpoint_epoch_final.pth --batch-size 128 --workers 0 --fp16
 
 RSTPReid:
-CUDA_VISIBLE_DEVICES=6 python scripts/evaluate.py --config configs/config_cuhk_pedes.yaml --root data/RSTPReid --dataset-configs "{'name': 'RSTPReid', 'root': 'data/RSTPReid/imgs', 'json_file': 'data/RSTPReid/data_captions.json'}" --checkpoint logs/rstp_reid/checkpoint_epoch_final.pth --batch-size 128 --workers 0 --fp16
+CUDA_VISIBLE_DEVICES=6 python scripts/evaluate.py --config configs/config_cuhk_pedes.yaml --root data/RSTPReid --dataset-configs "{'name': 'RSTPReid', 'root': 'data/RSTPReid/imgs', 'json_file': 'data/RSTPReid/annotations/data_captions.json'}" --checkpoint logs/rstp_reid/checkpoint_epoch_final.pth --batch-size 128 --workers 0 --fp16
 ```
 
 **Windows**

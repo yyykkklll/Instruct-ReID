@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 import torch
+import logging
 
 from ..loss.adv_loss import CombinedLoss
 from ..evaluation.evaluators_t import Evaluator_t2i
@@ -17,7 +18,8 @@ class T2IReIDTrainer:
             margin_triplet=0.3,
             weights=(1.0, 1.0, 1.0)
         ).to(self.device)
-        self.scaler = torch.amp.GradScaler('cuda', enabled=self.args.fp16)
+        self.scaler = torch.amp.GradScaler('cuda', enabled=args.fp16)
+        self.accum_steps = 2  # 梯度累积步数
 
     def run(self, inputs):
         image, caption, pid, cam_id = inputs
@@ -25,90 +27,112 @@ class T2IReIDTrainer:
         pid = pid.to(self.device)
         cam_id = cam_id.to(self.device) if cam_id is not None else None
 
-        # 前向传播
-        with torch.amp.autocast('cuda', enabled=self.args.fp16):
-            image_feats, text_feats = self.model(image=image, instruction=caption)
+        image_feats, text_feats = self.model(image=image, instruction=caption)
+        if image_feats is None or text_feats is None:
+            logging.error(f"Invalid model output - Image feats: {image_feats}, Text feats: {text_feats}")
+            return torch.tensor(0.0, device=self.device, requires_grad=True)
 
-            # 计算损失
-            loss_dict = self.combined_loss(image_feats, text_feats, pid)
+        loss_dict = self.combined_loss(image_feats, text_feats, pid)
+        total_loss = loss_dict['total_loss']
+        return total_loss
 
-        return loss_dict
+    def train_epoch(self, train_loader, optimizer, lr_scheduler, epoch, scaler):
+        self.model.train()
+        total_loss = 0
+        total_info_nce = 0
+        total_clip = 0
+        total_triplet = 0
+        batch_count = 0
+
+        optimizer.zero_grad()
+        for i, inputs in enumerate(train_loader):
+            with torch.amp.autocast('cuda', enabled=self.args.fp16):
+                loss = self.run(inputs)
+
+            if not isinstance(loss, torch.Tensor):
+                logging.error(f"Epoch {epoch + 1}, Batch {i + 1}: Loss is not a tensor: {loss}")
+                continue
+            if not loss.requires_grad:
+                logging.warning(f"Epoch {epoch + 1}, Batch {i + 1}: Loss does not require grad: {loss.item()}")
+                continue
+
+            # 梯度累积
+            scaled_loss = scaler.scale(loss) / self.accum_steps
+            scaled_loss.backward()
+
+            if (i + 1) % self.accum_steps == 0 or (i + 1) == len(train_loader):
+                scaler.step(optimizer)
+                scaler.update()
+                optimizer.zero_grad()
+
+            # 记录损失
+            with torch.no_grad():
+                image, caption, pid, _ = inputs
+                image = image.to(self.device)
+                pid = pid.to(self.device)
+                image_feats, text_feats = self.model(image, caption)
+                loss_dict = self.combined_loss(image_feats, text_feats, pid)
+                total_loss += loss_dict['total_loss'].item()
+                total_info_nce += loss_dict['info_nce_loss'].item()
+                total_clip += loss_dict['clip_loss'].item()
+                total_triplet += loss_dict['triplet_loss'].item()
+            batch_count += 1
+
+            if (i + 1) % self.args.print_freq == 0:
+                avg_loss = total_loss / batch_count
+                avg_info_nce = total_info_nce / batch_count
+                avg_clip = total_clip / batch_count
+                avg_triplet = total_triplet / batch_count
+                log_msg = (f"Epoch {epoch + 1}, Batch {i + 1}/{len(train_loader)}, "
+                           f"Loss: {avg_loss:.4f}, "
+                           f"InfoNCE: {avg_info_nce:.4f}, "
+                           f"CLIP: {avg_clip:.4f}, "
+                           f"Triplet: {avg_triplet:.4f}, "
+                           f"LR: {optimizer.param_groups[0]['lr']:.6f}")
+                logging.info(log_msg)
+
+        lr_scheduler.step()
 
     def train(self, train_loader, optimizer, lr_scheduler, query_loader=None, query=None, gallery=None):
         self.model.train()
         best_mAP = 0.0
         best_checkpoint = None
+        ROOT_DIR = Path(__file__).parent.parent.parent
 
-        # 项目根目录定位
-        ROOT_DIR = Path(__file__).parent.parent.parent  # 从 src/trainer/ 到 TextGuidedReID/
+        for epoch in range(self.args.epochs):
+            self.train_epoch(train_loader, optimizer, lr_scheduler, epoch, self.scaler)
 
-        for epoch in range(1, self.args.epochs + 1):
-            total_loss = 0
-            total_info_nce = 0
-            total_clip = 0
-            total_triplet = 0
-            batch_count = 0
-
-            for i, inputs in enumerate(train_loader):
-                optimizer.zero_grad()
-                loss_dict = self.run(inputs)
-                loss = loss_dict['total_loss']
-
-                if self.args.fp16:
-                    self.scaler.scale(loss).backward()
-                    self.scaler.step(optimizer)
-                    self.scaler.update()
-                else:
-                    loss.backward()
-                    optimizer.step()
-
-                total_loss += loss.item()
-                total_info_nce += loss_dict['info_nce_loss'].item()
-                total_clip += loss_dict['clip_loss'].item()
-                total_triplet += loss_dict['triplet_loss'].item()
-                batch_count += 1
-
-                if i % self.args.print_freq == 0:
-                    avg_loss = total_loss / (i + 1)
-                    avg_info_nce = total_info_nce / batch_count
-                    avg_clip = total_clip / batch_count
-                    avg_triplet = total_triplet / batch_count
-                    print(f"Epoch {epoch}, Batch {i}/{len(train_loader)}, "
-                          f"Loss: {avg_loss:.4f}, "
-                          f"InfoNCE: {avg_info_nce:.4f}, "
-                          f"CLIP: {avg_clip:.4f}, "
-                          f"Triplet: {avg_triplet:.4f}, "
-                          f"LR: {optimizer.param_groups[0]['lr']:.6f}")
-
-            lr_scheduler.step()
-
-            # 在 save_freq 时保存并评估
-            if epoch % self.args.save_freq == 0 or epoch == self.args.epochs:
-                save_path = os.path.join(ROOT_DIR, self.args.logs_dir, f"checkpoint_epoch_{epoch:03d}.pth")
+            if (epoch + 1) % self.args.save_freq == 0 or (epoch + 1) == self.args.epochs:
+                save_path = os.path.join(ROOT_DIR, self.args.logs_dir, f"checkpoint_epoch_{epoch + 1:03d}.pth")
                 torch.save({
                     'model': self.model.state_dict(),
                     'optimizer': optimizer.state_dict(),
                     'lr_scheduler': lr_scheduler.state_dict(),
-                    'epoch': epoch
+                    'epoch': epoch + 1
                 }, save_path)
-                print(f"Model saved at: {save_path}")
+                logging.info(f"Model saved at: {save_path}")
 
-                # 评估
                 if query_loader is not None and query is not None and gallery is not None:
                     evaluator = Evaluator_t2i(self.model)
                     metrics = evaluator.evaluate(query_loader, query_loader, query, gallery)
-                    print(f"Epoch {epoch} Evaluation Results:")
-                    print(metrics)
+                    logging.info(f"Epoch {epoch + 1} Evaluation Results:")
+                    logging.info(f"  mAP: {metrics['mAP']:.4f}, Rank-1: {metrics['rank1']:.4f}, "
+                                 f"Rank-5: {metrics['rank5']:.4f}, Rank-10: {metrics['rank10']:.4f}")
 
-                    # 更新最佳检查点
                     mAP = metrics['mAP']
                     if mAP > best_mAP:
                         best_mAP = mAP
                         best_checkpoint = save_path
-                        print(f"New best checkpoint saved: {best_checkpoint} with mAP: {best_mAP:.4f}")
+                        best_save_path = os.path.join(ROOT_DIR, self.args.logs_dir, 'checkpoint_best.pth')
+                        torch.save({
+                            'model': self.model.state_dict(),
+                            'optimizer': optimizer.state_dict(),
+                            'lr_scheduler': lr_scheduler.state_dict(),
+                            'epoch': epoch + 1
+                        }, best_save_path)
+                        logging.info(f"New best checkpoint saved: {best_save_path} with mAP: {best_mAP:.4f}")
 
-        # 打印最佳检查点
         if best_checkpoint:
-            print("=" * 80)
-            print(f"Training completed. Best checkpoint: {best_checkpoint} with mAP: {best_mAP:.4f}")
-            print("=" * 80)
+            logging.info("=" * 80)
+            logging.info(f"Training completed. Best checkpoint: {best_checkpoint} with mAP: {best_mAP:.4f}")
+            logging.info("=" * 80)
