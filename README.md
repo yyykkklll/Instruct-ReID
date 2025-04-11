@@ -1,8 +1,10 @@
 # 项目介绍
 
-本模型使用了 **VIT + Bert** 实现了基于文本指导的Reid
+本模型使用了 **VIT + Bert** 实现了**基于文本指导的Reid**：
 
-文件组织结构（**tree.txt**）：
+------
+
+## 文件组织结构如下（**tree.txt**）：
 
 ```python
 v3/
@@ -105,6 +107,57 @@ v3/
 ```
 
 其中**pretrained**文件中的权重文件和预训练模型可前往[google/vit-base-patch16-224 · Hugging Face](https://huggingface.co/google/vit-base-patch16-224)进行下载，或者通过**Baidupan**分享的文件：链接: https://pan.baidu.com/s/1kxKxPmp3QWEf6IugfqnMBg 提取码: 1ukx下载
+
+------
+
+## 准备工作
+
+首先在正式训练模型之前，需要相应的准备工作：
+### **环境依赖**（`requirements.txt`）：
+
+```python
+accelerate==1.0.1
+clip==0.2.0
+easydict==1.13
+matplotlib==3.7.5
+opencv-python==4.9.0.80
+pillow==10.4.0
+protobuf==5.29.4
+psutil==7.0.0
+PyYAML==6.0.1
+requests==2.32.3
+scikit-learn==1.3.0
+scipy==1.10.1
+sympy==1.13.3
+tensorboardX==2.6.2.2
+timm==0.9.16
+tqdm==4.65.0
+transformers==4.46.3
+h5py==3.11.0
+safetensors==0.5.3
+tokenizers==0.20.3
+ftfy==5.8
+huggingface-hub==0.29.3
+Jinja2==3.1.6
+networkx==3.1
+numpy==1.24.4
+```
+
+#### 使用步骤
+
+1. **安装PyTorch**（按需选择CUDA版本）：
+
+   ```python
+   pip install torch==2.4.1+cu121 torchvision==0.19.1+cu121 torchaudio==2.4.1+cu121 --extra-index-url https://download.pytorch.org/whl/cu121
+   ```
+
+2. **安装其他依赖**：
+
+   ```python
+   pip install -r requirements.txt
+   ```
+
+### **数据集：**
 
 本模型数据集使用了**CUHK-PEDES,ICFG-PEDES,RSTPReid**进行测试评估.自行前往官网进行下载：
 
