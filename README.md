@@ -1,121 +1,80 @@
-# 项目介绍
+# 基于文本指导的 ReID 模型
 
-本模型使用了 **VIT + Bert** 实现了**基于文本指导的Reid**：
+本项目基于 **VIT + Bert** 架构，实现了 **基于文本指导的行人重识别（ReID）**。通过结合视觉和文本信息，模型在多个公开数据集上展现了优异的性能。
 
-------
+---
 
-## 文件组织结构如下（**tree.txt**）：
+## 文件组织结构
 
-```python
+```plaintext
 v3/
 ├── data/                       # 数据集相关文件
-│   ├── CUHK-PEDES/            # 数据集1
-│   │   ├── imgs/              # 图像文件
+│   ├── CUHK-PEDES/             # 数据集1：CUHK-PEDES
+│   │   ├── imgs/               # 图像文件
 │   │   │   ├── cam_a/
 │   │   │   ├── CUHK03/
 │   │   │   ├── Market/
 │   │   │   ├── test_query/
 │   │   │   └── train_query/
-│   │   ├── annotations/       # 标注文件
+│   │   ├── annotations/        # 标注文件
 │   │   │   └── caption_all.json
-│   │   └── readme.txt         # 数据集说明
-│   ├── ICFG-PEDES/            # 数据集2
+│   │   └── readme.txt          # 数据集说明
+│   ├── ICFG-PEDES/             # 数据集2：ICFG-PEDES
 │   │   ├── imgs/
 │   │   │   ├── test/
 │   │   │   └── train/
 │   │   ├── annotations/
 │   │   │   └── ICFG-PEDES.json
-│   │   └── processed_data/    # 预处理数据
+│   │   └── processed_data/     # 预处理数据
 │   │       ├── data_message
 │   │       ├── ind2word.pkl
 │   │       ├── test_save.pkl
 │   │       └── train_save.pkl
-│   └── RSTPReid/              # 数据集3
+│   └── RSTPReid/               # 数据集3：RSTPReid
 │       ├── imgs/
 │       └── annotations/
 │           └── data_captions.json
-├── src/                       # 源代码
-│   ├── datasets/              # 数据加载与预处理
-│   │   ├── data_builder_t2i.py
-│   │   ├── image_layer.py
-│   │   ├── base_dataset.py
-│   │   ├── preprocessor_t2i.py
-│   │   ├── sampler.py
-│   │   ├── transforms.py
-│   │   └── __init__.py
-│   ├── models/                # 模型定义
-│   │   ├── backbone/          # 模型骨干网络
-│   │   │   ├── pass_vit.py
-│   │   │   ├── vit_albef.py
-│   │   │   ├── vit_albef_ori.py
-│   │   │   ├── ckpt.py
-│   │   │   └── __init__.py
-│   │   ├── pass_transformer_joint.py
-│   │   ├── tokenization_bert.py
-│   │   ├── xbert.py
-│   │   └── __init__.py
-│   ├── loss/                  # 损失函数
-│   │   ├── adv_loss.py
-│   │   └── __init__.py
-│   ├── trainer/               # 训练逻辑
-│   │   ├── base_trainer.py
-│   │   ├── pass_trainer.py
-│   │   ├── pass_trainer_joint.py
-│   │   └── __init__.py
-│   ├── evaluation/            # 评估逻辑
-│   │   ├── evaluators_t.py
-│   │   └── __init__.py
-│   ├── utils/                 # 工具函数
-│   │   ├── comm_.py
-│   │   ├── distributed_utils.py
-│   │   ├── distributed_utils_pt.py
-│   │   ├── logging.py
-│   │   ├── lr_scheduler.py
-│   │   ├── meters.py
-│   │   ├── osutils.py
-│   │   ├── serialization.py
-│   │   ├── vit_rollout.py
-│   │   └── __init__.py
-│   └── multi_tasks_utils/     # 多任务相关工具（可保留以备扩展）
-│       ├── multi_task_distributed_utils.py
-│       ├── multi_task_distributed_utils_pt.py
-│       └── __init__.py
-├── scripts/                   # 可执行脚本
-│   ├── train.py               # 训练脚本（重命名自train_joint.py）
-│   ├── evaluate.py            # 评估脚本
-│   ├── test.py                # 测试脚本（重命名自test_joint.py）
-│   ├── check_dataset.py       # 数据检查脚本
-│   └── check_checkpoint.py    # 检查点检查脚本
-├── configs/                   # 配置文件
-│   └── config_cuhk_pedes.yaml
-├── pretrained/                # 预训练模型
-│   ├── config.json
-│   ├── vit-base-patch16-224.pth
-│   ├── bert-base-uncased/     # BERT预训练权重
-│   │   ├── added_tokens.json
-│   │   ├── config.json
-│   │   ├── pytorch_model.bin
-│   │   ├── special_tokens_map.json
-│   │   └── vocab.txt
-│   └── vit-base-patch16-224/  # ViT预训练权重
-│       ├── config.json
-│       ├── preprocessor_config.json
-│       ├── pytorch_model.bin
-│       └── tf_model.h5
-├── logs/                      # 日志和输出
-└── README.md                  # 项目说明文档
+├── src/                        # 源代码
+│   ├── datasets/               # 数据加载与预处理模块
+│   ├── models/                 # 模型定义
+│   │   ├── backbone/           # 模型骨干网络
+│   │   ├── tokenization_bert.py # BERT 分词工具
+│   │   └── xbert.py            # 扩展 BERT 实现
+│   ├── loss/                   # 损失函数
+│   ├── trainer/                # 训练逻辑
+│   ├── evaluation/             # 评估逻辑
+│   ├── utils/                  # 工具函数
+│   └── multi_tasks_utils/      # 多任务相关工具（预留扩展）
+├── scripts/                    # 可执行脚本
+│   ├── train.py                # 训练脚本
+│   ├── evaluate.py             # 评估脚本
+│   ├── test.py                 # 测试脚本
+│   ├── check_dataset.py        # 数据检查脚本
+│   └── check_checkpoint.py     # 检查点检查脚本
+├── configs/                    # 配置文件
+│   └── config_cuhk_pedes.yaml  # 默认配置文件
+├── pretrained/                 # 预训练模型权重
+│   ├── vit-base-patch16-224/   # ViT 预训练权重
+│   └── bert-base-uncased/      # BERT 预训练权重
+├── logs/                       # 日志和输出
+└── README.md                   # 项目说明文档
 ```
 
-其中**pretrained**文件中的权重文件和预训练模型可前往[google/vit-base-patch16-224 · Hugging Face](https://huggingface.co/google/vit-base-patch16-224)进行下载，或者通过**Baidupan**分享的文件：链接: https://pan.baidu.com/s/1kxKxPmp3QWEf6IugfqnMBg 提取码: 1ukx下载
+> **注意**：预训练模型权重可通过以下方式获取：
+> - [Hugging Face: google/vit-base-patch16-224](https://huggingface.co/google/vit-base-patch16-224)
+> - 或通过百度网盘下载：链接: [https://pan.baidu.com/s/1kxKxPmp3QWEf6IugfqnMBg](https://pan.baidu.com/s/1kxKxPmp3QWEf6IugfqnMBg) 提取码: `1ukx`
 
-------
+---
 
 ## 准备工作
 
-首先在正式训练模型之前，需要相应的准备工作：
-### **环境依赖**（`requirements.txt`）：
+在正式训练模型之前，请确保完成以下准备工作：
 
-```python
+### 环境依赖
+
+请参考 `requirements.txt` 文件安装所有依赖项：
+
+```plaintext
 accelerate==1.0.1
 clip==0.2.0
 easydict==1.13
@@ -143,70 +102,123 @@ networkx==3.1
 numpy==1.24.4
 ```
 
-#### 使用步骤
+#### 安装步骤
 
-1. **安装PyTorch**（按需选择CUDA版本）：
+1. **安装 PyTorch**（根据需要选择 CUDA 版本）：
 
-   ```python
+   ```bash
    pip install torch==2.4.1+cu121 torchvision==0.19.1+cu121 torchaudio==2.4.1+cu121 --extra-index-url https://download.pytorch.org/whl/cu121
    ```
 
 2. **安装其他依赖**：
 
-   ```python
+   ```bash
    pip install -r requirements.txt
    ```
 
-### **数据集：**
+### 数据集准备
 
-本模型数据集使用了**CUHK-PEDES,ICFG-PEDES,RSTPReid**进行测试评估.自行前往官网进行下载：
+本项目支持以下三个数据集进行训练和评估：
 
-**CUHK-PEDES：**[layumi/Image-Text-Embedding: TOMM2020 Dual-Path Convolutional Image-Text Embedding with Instance Loss https://arxiv.org/abs/1711.05535](https://github.com/layumi/Image-Text-Embedding)
+- **CUHK-PEDES**: [layumi/Image-Text-Embedding](https://github.com/layumi/Image-Text-Embedding)
+- **ICFG-PEDES**: [zifyloo/SSAN](https://github.com/zifyloo/SSAN)
+- **RSTPReid**: [NjtechCVLab/RSTPReid-Dataset](https://github.com/NjtechCVLab/RSTPReid-Dataset)
 
-**ICFG-PEDES：**[zifyloo/SSAN: Code of SSAN](https://github.com/zifyloo/SSAN)
+请自行前往上述链接下载并解压数据集到 `data/` 目录下。
 
-**RSTPReid：**[NjtechCVLab/RSTPReid-Dataset: RSTPReid Dataset for Text-based Person Retrieval.](https://github.com/NjtechCVLab/RSTPReid-Dataset)
+---
 
-准备工作完成之后，可使用以下命令进行训练：
+## 使用方法
 
-```python
-CUHK-PEDES:
-CUDA_VISIBLE_DEVICES=6 python scripts/train.py --config configs/config_cuhk_pedes.yaml --root data/CUHK-PEDES --dataset-configs "{'name': 'CUHK-PEDES', 'root': 'data/CUHK-PEDES/imgs', 'json_file': 'data/CUHK-PEDES/annotations/caption_all.json'}" --batch-size 128 --workers 0 --fp16 --logs-dir logs/cuhk_pedes
+### 训练模型
 
+使用以下命令启动训练过程：
 
-ICFG-PEDES:
-CUDA_VISIBLE_DEVICES=6 python scripts/train.py --config configs/config_cuhk_pedes.yaml --root data/ICFG-PEDES --dataset-configs "{'name': 'ICFG-PEDES', 'root': 'data/ICFG-PEDES/imgs', 'json_file': 'data/ICFG-PEDES/annotations/ICFG-PEDES.json'}" --batch-size 128 --workers 0 --fp16 --logs-dir logs/icfg_pedes
+```bash
+# CUHK-PEDES
+CUDA_VISIBLE_DEVICES=6 python scripts/train.py \
+  --config configs/config_cuhk_pedes.yaml \
+  --root data/CUHK-PEDES \
+  --dataset-configs "{'name': 'CUHK-PEDES', 'root': 'data/CUHK-PEDES/imgs', 'json_file': 'data/CUHK-PEDES/annotations/caption_all.json'}" \
+  --batch-size 128 \
+  --workers 0 \
+  --fp16 \
+  --logs-dir logs/cuhk_pedes
 
-RSTPReid:
-CUDA_VISIBLE_DEVICES=6 python scripts/train.py --config configs/config_cuhk_pedes.yaml --root data/RSTPReid --dataset-configs "{'name': 'RSTPReid', 'root': 'data/RSTPReid/imgs', 'json_file': 'data/RSTPReid/annotations/data_captions.json'}" --batch-size 128 --workers 0 --fp16 --logs-dir logs/rstp_reid
+# ICFG-PEDES
+CUDA_VISIBLE_DEVICES=6 python scripts/train.py \
+  --config configs/config_cuhk_pedes.yaml \
+  --root data/ICFG-PEDES \
+  --dataset-configs "{'name': 'ICFG-PEDES', 'root': 'data/ICFG-PEDES/imgs', 'json_file': 'data/ICFG-PEDES/annotations/ICFG-PEDES.json'}" \
+  --batch-size 128 \
+  --workers 0 \
+  --fp16 \
+  --logs-dir logs/icfg_pedes
+
+# RSTPReid
+CUDA_VISIBLE_DEVICES=6 python scripts/train.py \
+  --config configs/config_cuhk_pedes.yaml \
+  --root data/RSTPReid \
+  --dataset-configs "{'name': 'RSTPReid', 'root': 'data/RSTPReid/imgs', 'json_file': 'data/RSTPReid/annotations/data_captions.json'}" \
+  --batch-size 128 \
+  --workers 0 \
+  --fp16 \
+  --logs-dir logs/rstp_reid
 ```
 
-模型训练完成会自动运行评估脚本。也可通过以下命令自行评估测试：
+训练完成后，模型会自动运行评估脚本。
 
-**Linux**
+---
 
-```python
-CUHK-PEDES:
-CUDA_VISIBLE_DEVICES=6 python scripts/evaluate.py --config configs/config_cuhk_pedes.yaml --root data/CUHK-PEDES --dataset-configs "{'name': 'CUHK-PEDES', 'root': 'data/CUHK-PEDES/imgs', 'json_file': 'data/CUHK-PEDES/annotations/caption_all.json'}" --checkpoint logs/cuhk_pedes/checkpoint_epoch_final.pth --batch-size 128 --workers 0 --fp16
+### 模型评估
 
-ICFG-PEDES:
-CUDA_VISIBLE_DEVICES=6 python scripts/evaluate.py --config configs/config_cuhk_pedes.yaml --root data/ICFG-PEDES --dataset-configs "{'name': 'ICFG-PEDES', 'root': 'data/ICFG-PEDES/imgs', 'json_file': 'data/ICFG-PEDES/ICFG-PEDES.json'}" --checkpoint logs/icfg_pedes/checkpoint_epoch_final.pth --batch-size 128 --workers 0 --fp16
+如果需要手动评估模型，可以使用以下命令：
 
-RSTPReid:
-CUDA_VISIBLE_DEVICES=6 python scripts/evaluate.py --config configs/config_cuhk_pedes.yaml --root data/RSTPReid --dataset-configs "{'name': 'RSTPReid', 'root': 'data/RSTPReid/imgs', 'json_file': 'data/RSTPReid/data_captions.json'}" --checkpoint logs/rstp_reid/checkpoint_epoch_final.pth --batch-size 128 --workers 0 --fp16
+#### Linux
+
+```bash
+# CUHK-PEDES
+CUDA_VISIBLE_DEVICES=6 python scripts/evaluate.py \
+  --config configs/config_cuhk_pedes.yaml \
+  --root data/CUHK-PEDES \
+  --dataset-configs "{'name': 'CUHK-PEDES', 'root': 'data/CUHK-PEDES/imgs', 'json_file': 'data/CUHK-PEDES/annotations/caption_all.json'}" \
+  --checkpoint logs/cuhk_pedes/checkpoint_epoch_final.pth \
+  --batch-size 128 \
+  --workers 0 \
+  --fp16
+
+# ICFG-PEDES 和 RSTPReid 类似，仅需调整路径和参数。
 ```
 
-**Windows**
+#### Windows
 
-```python
-CUHK-PEDES:
-set CUDA_VISIBLE_DEVICES=6 && python scripts/evaluate.py --config configs\config_cuhk_pedes.yaml --root data\CUHK-PEDES --dataset-configs "{'name': 'CUHK-PEDES', 'root': 'data\CUHK-PEDES\imgs', 'json_file': 'data\CUHK-PEDES\annotations\caption_all.json'}" --checkpoint logs\cuhk_pedes\checkpoint_epoch_final.pth --batch-size 128 --workers 0 --fp16
+```bash
+# CUHK-PEDES
+set CUDA_VISIBLE_DEVICES=6 && python scripts/evaluate.py ^
+  --config configs\config_cuhk_pedes.yaml ^
+  --root data\CUHK-PEDES ^
+  --dataset-configs "{'name': 'CUHK-PEDES', 'root': 'data\CUHK-PEDES\imgs', 'json_file': 'data\CUHK-PEDES\annotations\caption_all.json'}" ^
+  --checkpoint logs\cuhk_pedes\checkpoint_epoch_final.pth ^
+  --batch-size 128 ^
+  --workers 0 ^
+  --fp16
 
-ICFG-PEDES:
-set CUDA_VISIBLE_DEVICES=6 && python scripts/evaluate.py --config configs\config_cuhk_pedes.yaml --root data\ICFG-PEDES --dataset-configs "{'name': 'ICFG-PEDES', 'root': 'data\ICFG-PEDES\imgs', 'json_file': 'data\ICFG-PEDES\ICFG-PEDES.json'}" --checkpoint logs\icfg_pedes\checkpoint_epoch_final.pth --batch-size 128 --workers 0 --fp16
-
-RSTPReid:
-set CUDA_VISIBLE_DEVICES=6 && python scripts/evaluate.py --config configs\config_cuhk_pedes.yaml --root data\RSTPReid --dataset-configs "{'name': 'RSTPReid', 'root': 'data\RSTPReid\imgs', 'json_file': 'data\RSTPReid\data_captions.json'}" --checkpoint logs\rstp_reid\checkpoint_epoch_final.pth --batch-size 128 --workers 0 --fp16
+# ICFG-PEDES 和 RSTPReid 类似，仅需调整路径和参数。
 ```
 
-相关参数配置可在**configs/config_cuhk_pedes.yaml**文件中调整
+---
+
+### 配置文件
+
+所有超参数和配置均可在 `configs/config_cuhk_pedes.yaml` 文件中调整。请根据需求修改对应参数。
+
+---
+
+## 注意事项
+
+1. **GPU 设备**：请确保正确设置 `CUDA_VISIBLE_DEVICES` 参数以指定可用 GPU。
+2. **混合精度训练**：`--fp16` 参数启用混合精度训练，可显著加速训练过程。
+3. **日志目录**：训练和评估结果默认存储在 `logs/` 目录下。
+
+---
+
