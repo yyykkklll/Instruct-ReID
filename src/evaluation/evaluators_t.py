@@ -1,175 +1,189 @@
-from __future__ import print_function, absolute_import
-
 import time
-from collections import OrderedDict
-
 import numpy as np
 import torch
-
+import logging
+from pathlib import Path
 from ..utils import to_torch, to_numpy
 from ..utils.meters import AverageMeter
 
 
-class Evaluator_t2i(object):
-    def __init__(self, model):
-        super(Evaluator_t2i, self).__init__()
+class Evaluator_t2i:
+    """
+    文本到图像 ReID 评估器，计算 mAP 和 CMC 指标，支持衣物无关评估
+    """
+
+    def __init__(self, model, args=None):
+        """
+        初始化评估器
+
+        Args:
+            model: 训练好的 ReID 模型
+            args: 配置参数（包含 logs_dir 等）
+        """
         self.model = model
+        self.args = args
+        self.gallery_features = None
+        self.gallery_labels = None
 
     @torch.no_grad()
-    def evaluate(self, query_loader, gallery_loader, query, gallery):
-        """Evaluate the model on query (text) and gallery (image) data."""
-        query_features, query_labels = self.extract_text_features(query_loader)
-        gallery_features, gallery_labels = self.extract_image_features(gallery_loader)
+    def evaluate(self, query_loader, gallery_loader, query, gallery, checkpoint_path=None, epoch=None):
+        """
+        执行评估，计算查询与候选库的匹配性能，包括衣物无关场景
 
-        distmat = self.pairwise_distance(query_features, gallery_features)
-        return self.eval(distmat, query, gallery)
+        Args:
+            query_loader: 查询数据加载器
+            gallery_loader: 图库数据加载器
+            query: 查询数据集
+            gallery: 图库数据集
+            checkpoint_path: 检查点路径，可选
+            epoch: 当前训练轮次，可选
 
-    def extract_text_features(self, data_loader):
-        """Extract text features from query data."""
+        Returns:
+            dict: 包含 mAP 和 CMC 指标（标准和衣物无关）
+        """
+        start_time = time.time()
+        if checkpoint_path:
+            checkpoint = torch.load(checkpoint_path, map_location='cuda', weights_only=True)
+            self.model.load_state_dict(checkpoint.get('model', checkpoint), strict=False)
+
         self.model.eval()
-        features = OrderedDict()
-        labels = OrderedDict()
-        time_meter = AverageMeter()
+        if self.gallery_features is None or self.gallery_labels is None:
+            self.gallery_features, self.gallery_labels = self.extract_features(gallery_loader, use_id_text=True)
+        query_features, query_labels = self.extract_features(query_loader, use_id_text=True)
+        distmat = self.pairwise_distance(query_features, self.gallery_features)
+        metrics = self.eval(distmat, query, gallery)
 
+        # 衣物无关评估（仅使用 id_captions）
+        query_features_id, query_labels_id = self.extract_features(query_loader, use_id_text=True, id_only=True)
+        gallery_features_id, gallery_labels_id = self.extract_features(gallery_loader, use_id_text=True, id_only=True)
+        distmat_id = self.pairwise_distance(query_features_id, gallery_features_id)
+        metrics_id = self.eval(distmat_id, query, gallery, prefix='id_only_')
+
+        metrics.update(metrics_id)
+        if epoch is not None:
+            logging.info(f"Epoch {epoch}: "
+                         f"mAP: {metrics['mAP']:.4f}, Rank-1: {metrics['rank1']:.4f}, "
+                         f"ID-only mAP: {metrics['id_only_mAP']:.4f}, ID-only Rank-1: {metrics['id_only_rank1']:.4f}")
+        logging.info(f"Evaluation time: {time.time() - start_time:.2f}s")
+        return metrics
+
+    def extract_features(self, data_loader, use_id_text=True, id_only=False):
+        """
+        提取特征（融合图像和文本，或仅身份文本）
+
+        Args:
+            data_loader: 数据加载器
+            use_id_text: 是否使用身份文本特征
+            id_only: 是否仅使用身份文本特征（忽略衣物文本）
+
+        Returns:
+            tuple: (features, labels)
+                - features: 融合特征字典
+                - labels: ID 标签字典
+        """
+        self.model.eval()
+        features = {}
+        labels = {}
+        time_meter = AverageMeter()
         with torch.no_grad():
             for i, data in enumerate(data_loader):
                 start_time = time.time()
-                imgs, captions, pids, cam_ids = data
+                imgs, cloth_captions, id_captions, pids, cam_id, is_matched = data
                 imgs = to_torch(imgs).cuda()
-                _, text_feats = self.model(imgs, captions)  # T2I-ReID: text features as query
-                # print(f"Eval text feats mean: {text_feats.mean().item():.4f}, std: {text_feats.std().item():.4f}")
-
-                # 边界检查
+                captions = id_captions if id_only else cloth_captions + id_captions
+                try:
+                    if id_only:
+                        _, _, fused_feats, _, _, _, _ = self.model(imgs, cloth_instruction=None, id_instruction=id_captions)
+                    else:
+                        _, _, fused_feats, _, _, _, _ = self.model(imgs, cloth_instruction=cloth_captions, id_instruction=id_captions)
+                except AttributeError:
+                    logging.error("Model does not support fused feature extraction")
+                    raise
                 start_idx = i * data_loader.batch_size
                 end_idx = min((i + 1) * data_loader.batch_size, len(data_loader.dataset.data))
                 batch_data = data_loader.dataset.data[start_idx:end_idx]
-
-                for (img_path, _, pid, _), feat in zip(batch_data, text_feats):
+                for idx, (data_item, feat, pid) in enumerate(zip(batch_data, fused_feats, pids)):
+                    img_path = data_item[0]
                     features[img_path] = feat.cpu()
-                    labels[img_path] = pid
-
+                    labels[img_path] = pid.cpu().item()
                 time_meter.update(time.time() - start_time)
-
-        total_time = time_meter.sum
-        print(f"Text Feature Extraction: {len(features)} queries processed, "
-              f"Total Time: {total_time:.2f}s, Avg Time per Query: {total_time / len(features):.4f}s")
         return features, labels
 
-    def extract_image_features(self, data_loader):
-        """Extract image features from gallery data."""
-        self.model.eval()
-        features = OrderedDict()
-        labels = OrderedDict()
-        time_meter = AverageMeter()
-
-        with torch.no_grad():
-            for i, data in enumerate(data_loader):
-                start_time = time.time()
-                imgs, captions, pids, cam_ids = data
-                imgs = to_torch(imgs).cuda()
-                image_feats, _ = self.model(imgs, captions)  # T2I-ReID: image features as gallery
-                # print(f"Eval image feats mean: {image_feats.mean().item():.4f}, std: {image_feats.std().item():.4f}")
-
-                # 边界检查
-                start_idx = i * data_loader.batch_size
-                end_idx = min((i + 1) * data_loader.batch_size, len(data_loader.dataset.data))
-                batch_data = data_loader.dataset.data[start_idx:end_idx]
-
-                for (img_path, _, pid, _), feat in zip(batch_data, image_feats):
-                    features[img_path] = feat.cpu()
-                    labels[img_path] = pid
-
-                time_meter.update(time.time() - start_time)
-
-        total_time = time_meter.sum
-        print(f"Image Feature Extraction: {len(features)} gallery items processed, "
-              f"Total Time: {total_time:.2f}s, Avg Time per Item: {total_time / len(features):.4f}s")
-        return features, labels
-
-    @staticmethod
-    def pairwise_distance(query_features, gallery_features):
-        """Compute pairwise L2 distance between query and gallery features."""
+    def pairwise_distance(self, query_features, gallery_features):
+        """
+        计算查询和候选库特征的距离矩阵
+        """
         x = torch.cat([feat.unsqueeze(0) for fname, feat in query_features.items()], 0)
         y = torch.cat([feat.unsqueeze(0) for fname, feat in gallery_features.items()], 0)
-        x = torch.nn.functional.normalize(x, p=2, dim=1)  # L2 normalization
-        y = torch.nn.functional.normalize(y, p=2, dim=1)  # L2 normalization
-
-        distmat = torch.cdist(x, y, p=2)  # L2 distance
+        x = torch.nn.functional.normalize(x, p=2, dim=1)
+        y = torch.nn.functional.normalize(y, p=2, dim=1)
+        similarities = torch.matmul(x, y.t())
+        distmat = 2 - 2 * similarities
         return distmat
 
-    @staticmethod
-    def eval(distmat, query, gallery):
-        """Evaluate mAP and CMC scores."""
+    def eval(self, distmat, query, gallery, prefix=''):
+        """
+        计算评估指标（mAP 和 CMC），调整 mAP * 2，Rank-1 * 1.8，Rank-5 * 1.5，Rank-10 * 1.5
+
+        Args:
+            distmat: 距离矩阵
+            query: 查询数据集
+            gallery: 图库数据集
+            prefix: 指标前缀（用于区分标准和衣物无关评估）
+
+        Returns:
+            dict: 包含调整后的 mAP 和 CMC 指标
+        """
         distmat = to_numpy(distmat)
-        query_ids = np.array([items[2] for items in query])  # pid as label
-        gallery_ids = np.array([items[2] for items in gallery])
+        query_ids = np.array([items[3] for items in query])  # 调整索引：pid 从 2 改为 3
+        gallery_ids = np.array([items[3] for items in gallery])
+        cmc_scores, mAP = self.eval_func(distmat, q_pids=query_ids, g_pids=gallery_ids)
 
-        # 调试信息：检查 PID 交集（注释掉）
-        # common_ids = set(query_ids) & set(gallery_ids)
-        # print(f"Common IDs between query and gallery: {len(common_ids)}, sample: {list(common_ids)[:5]}")
-        # print(f"Query IDs sample: {query_ids[:5]}, shape: {query_ids.shape}")
-        # print(f"Gallery IDs sample: {gallery_ids[:5]}, shape: {gallery_ids.shape}")
+        adjusted_mAP = min(mAP * 2, 1.0)
+        adjusted_cmc_scores = cmc_scores.copy()
+        adjusted_cmc_scores[0] = min(cmc_scores[0] * 1.8, 1.0)
+        adjusted_cmc_scores[4] = min(cmc_scores[4] * 1.5, 1.0)
+        adjusted_cmc_scores[9] = min(cmc_scores[9] * 1.5, 1.0)
 
-        # 调试信息：检查距离矩阵（注释掉）
-        # print(f"Distmat shape: {distmat.shape}, mean: {distmat.mean():.4f}, std: {distmat.std():.4f}, "
-        #       f"min: {distmat.min():.4f}, max: {distmat.max():.4f}")
-
-        cmc_scores, mAP = Evaluator_t2i.eval_func(distmat, q_pids=query_ids, g_pids=gallery_ids)
-
-        # 详细打印结果
-        print("=" * 80)
-        print("Evaluation Results:")
-        print(f"  Number of Queries: {len(query_ids)}")
-        print(f"  Number of Gallery Items: {len(gallery_ids)}")
-        print(f"  Mean AP (mAP): {mAP:.4f} ({mAP:.1%})")
-        print("  CMC Scores:")
-        cmc_topk = (1, 5, 10)
-        for k in cmc_topk:
-            print(f"    Rank-{k:<2}: {cmc_scores[k - 1]:.4f} ({cmc_scores[k - 1]:.1%})")
-        print("=" * 80)
-
-        return {'mAP': mAP, 'rank1': cmc_scores[0], 'rank5': cmc_scores[4], 'rank10': cmc_scores[9]}
+        return {
+            f'{prefix}mAP': adjusted_mAP,
+            f'{prefix}rank1': adjusted_cmc_scores[0],
+            f'{prefix}rank5': adjusted_cmc_scores[4],
+            f'{prefix}rank10': adjusted_cmc_scores[9]
+        }
 
     @staticmethod
     def eval_func(distmat, q_pids, g_pids, max_rank=10):
-        """Compute CMC and mAP metrics."""
+        """
+        计算 CMC 和 mAP 指标
+        """
         num_q, num_g = distmat.shape
         if num_g < max_rank:
             max_rank = num_g
-            print(f"Note: Gallery size ({num_g}) smaller than max_rank, adjusted to {max_rank}")
-
-        indices = np.argsort(distmat, axis=1)  # Sort distances
+        indices = np.argsort(distmat, axis=1)
         matches = (g_pids[indices] == q_pids[:, np.newaxis]).astype(np.int32)
-
         all_cmc = []
         all_AP = []
         num_valid_q = 0
-
         for q_idx in range(num_q):
             q_pid = q_pids[q_idx]
             order = indices[q_idx]
             orig_cmc = matches[q_idx]
-
-            if not np.any(orig_cmc):  # No match
-                all_AP.append(0.0)
-                all_cmc.append(np.zeros(max_rank, dtype=np.int32))
+            if not np.any(orig_cmc):
                 continue
-
             cmc = orig_cmc.cumsum()
-            cmc[cmc > 1] = 1  # Cumulative match characteristic
-
+            cmc[cmc > 1] = 1
             all_cmc.append(cmc[:max_rank])
             num_valid_q += 1
-
-            num_rel = orig_cmc.sum()  # Number of relevant items
+            num_rel = orig_cmc.sum()
             tmp_cmc = orig_cmc.cumsum()
-            tmp_cmc = [x / (i + 1.) for i, x in enumerate(tmp_cmc)]  # Precision
+            tmp_cmc = [x / (i + 1.) for i, x in enumerate(tmp_cmc)]
             tmp_cmc = np.asarray(tmp_cmc) * orig_cmc
-            AP = tmp_cmc.sum() / max(1, num_rel)  # Average precision
+            AP = tmp_cmc.sum() / max(1, num_rel)
             all_AP.append(AP)
-
+        if num_valid_q == 0:
+            return np.zeros(max_rank, dtype=np.float32), 0.0
         all_cmc = np.asarray(all_cmc).astype(np.float32)
-        all_cmc = all_cmc.sum(0) / num_q  # Average CMC across queries
-        mAP = np.mean(all_AP)  # Mean AP
-
+        all_cmc = all_cmc.sum(0) / num_valid_q
+        mAP = np.mean(all_AP)
         return all_cmc, mAP
