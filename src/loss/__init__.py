@@ -1,10 +1,6 @@
 from __future__ import absolute_import
-
-from .adv_loss import InfoNCELoss, CLIPLoss, TripletLoss, CombinedLoss
+from .adv_loss import AdvancedLoss
 
 __all__ = [
-    'InfoNCELoss',
-    'CLIPLoss',
-    'TripletLoss',
-    'CombinedLoss'
+    'AdvancedLoss'
 ]
