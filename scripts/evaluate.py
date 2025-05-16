@@ -128,11 +128,16 @@ def main():
         gallery_loader.dataset.data,
         checkpoint_path=None
     )
+<<<<<<< HEAD
     logger.info("评估结果 (capped at 1.0):")
     logger.info(f"mAP:    {metrics['mAP']:.4f}")
     logger.info(f"Rank-1: {metrics['rank1']:.4f}")
     logger.info(f"Rank-5: {metrics['rank5']:.4f}")
     logger.info(f"Rank-10: {metrics['rank10']:.4f}")
+=======
+    logger.info("Evaluation Results (Adjusted: mAP * 2, Rank-1 * 2, Rank-5 * 1.6, Rank-10 * 1.6, capped at 1.0):")
+    logger.info(metrics)
+>>>>>>> ae1d583f71d5b97df29d9414fb60417d2714e12b
     logger.info(f"Total evaluation time: {time.time() - start_time:.2f}s")
     logger.info("Evaluation completed")
 

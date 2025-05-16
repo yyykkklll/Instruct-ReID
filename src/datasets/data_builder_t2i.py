@@ -6,6 +6,7 @@ import torchvision.transforms as transforms
 from PIL import Image
 from torch.utils.data import Dataset, DataLoader
 import logging
+<<<<<<< HEAD
 
 
 def check_overlap(query_data, gallery_data):
@@ -30,6 +31,49 @@ def merge_sub_datasets(dataset_configs, args, skip_logging=False):
     global_pid_counter = len(global_pid_list)
     ROOT_DIR = Path(__file__).parent.parent.parent
 
+=======
+
+
+def check_overlap(query_data, gallery_data):
+    """
+    检查查询和图库数据之间的ID重叠比例
+
+    Args:
+        query_data: 查询数据集，列表格式 [(img_path, cloth_caption, id_caption, pid, cam_id, is_matched), ...]
+        gallery_data: 图库数据集，列表格式 [(img_path, cloth_caption, id_caption, pid, cam_id, is_matched), ...]
+
+    Returns:
+        float: 平均重叠比例（百分比）
+    """
+    query_set = {item[3] for item in query_data}  # 修改索引：pid 从 2 改为 3
+    gallery_set = {item[3] for item in gallery_data}
+    overlap = query_set & gallery_set
+    query_overlap_ratio = len(overlap) / len(query_set) * 100 if query_set else 0
+    gallery_overlap_ratio = len(overlap) / len(gallery_set) * 100 if gallery_set else 0
+    avg_overlap_ratio = (query_overlap_ratio + gallery_overlap_ratio) / 2
+    logging.info(
+        f"Query overlap ratio: {query_overlap_ratio:.2f}%, Gallery overlap ratio: {gallery_overlap_ratio:.2f}%, "
+        f"Average: {avg_overlap_ratio:.2f}%")
+    return avg_overlap_ratio
+
+
+def merge_sub_datasets(dataset_configs, args):
+    """
+    合并多个数据集，划分训练、查询和图库，确保训练集和测试集无交集，查询和画廊集有50% ID重叠
+
+    Args:
+        dataset_configs: 数据集配置列表，格式 [{'name': str, 'root': str, 'json_file': str, 'cloth_json': str, 'id_json': str}, ...]
+        args: 命令行参数 (Namespace)
+
+    Returns:
+        list: 数据项列表，格式 [(img_path, cloth_caption, id_caption, pid, cam_id, is_matched), ...]
+    """
+    list_lines_all = []
+    global_pid_list = getattr(args, 'global_pid_list', {})  # 全局PID映射
+    global_pid_counter = len(global_pid_list)
+    ROOT_DIR = Path(__file__).parent.parent.parent
+
+>>>>>>> ae1d583f71d5b97df29d9414fb60417d2714e12b
     if not dataset_configs:
         logging.error("No dataset configurations provided")
         return list_lines_all
@@ -38,15 +82,24 @@ def merge_sub_datasets(dataset_configs, args, skip_logging=False):
         dataset_name = config.get('name', '')
         prefix = ROOT_DIR / config.get('root', '')
         json_file = ROOT_DIR / config.get('json_file', '')
+<<<<<<< HEAD
         cloth_json_file = ROOT_DIR / config.get('cloth_json', '')
         id_json_file = ROOT_DIR / config.get('id_json', '')
+=======
+        cloth_json_file = ROOT_DIR / config.get('cloth_json', '')  # 新增：衣物描述 JSON
+        id_json_file = ROOT_DIR / config.get('id_json', '')  # 新增：身份描述 JSON
+>>>>>>> ae1d583f71d5b97df29d9414fb60417d2714e12b
 
         if not dataset_name:
             logging.error("Dataset name not specified in config")
             continue
 
+<<<<<<< HEAD
         if not skip_logging:
             logging.info(f"Loading dataset {dataset_name} from {json_file}")
+=======
+        logging.info(f"Loading dataset {dataset_name} from {json_file}")
+>>>>>>> ae1d583f71d5b97df29d9414fb60417d2714e12b
         if not json_file.exists():
             logging.error(f"JSON file not found for {dataset_name} at: {json_file}")
             continue
@@ -57,23 +110,39 @@ def merge_sub_datasets(dataset_configs, args, skip_logging=False):
             logging.error(f"ID JSON file not found for {dataset_name} at: {id_json_file}")
             continue
 
+<<<<<<< HEAD
         # 加载 JSON 文件
         try:
             with open(json_file, 'r', encoding='utf-8') as f:
                 attr_dict_raw = json.load(f)
             if not skip_logging:
                 logging.info(f"Loaded {len(attr_dict_raw)} items from {json_file}")
+=======
+        # 加载原始 JSON
+        try:
+            with open(json_file, 'r', encoding='utf-8') as f:
+                attr_dict_raw = json.load(f)
+            logging.info(f"Loaded {len(attr_dict_raw)} items from {json_file}")
+>>>>>>> ae1d583f71d5b97df29d9414fb60417d2714e12b
         except json.JSONDecodeError as e:
             logging.error(f"Failed to parse JSON file {json_file}: {e}")
             continue
 
+<<<<<<< HEAD
+=======
+        # 加载衣物和身份描述 JSON
+>>>>>>> ae1d583f71d5b97df29d9414fb60417d2714e12b
         try:
             with open(cloth_json_file, 'r', encoding='utf-8') as f:
                 cloth_dict = {str(item['id']): item['captions'] for item in json.load(f)}
             with open(id_json_file, 'r', encoding='utf-8') as f:
                 id_dict = {str(item['id']): item['captions'] for item in json.load(f)}
+<<<<<<< HEAD
             if not skip_logging:
                 logging.info(f"Loaded {len(cloth_dict)} cloth captions and {len(id_dict)} ID captions for {dataset_name}")
+=======
+            logging.info(f"Loaded {len(cloth_dict)} cloth captions and {len(id_dict)} ID captions for {dataset_name}")
+>>>>>>> ae1d583f71d5b97df29d9414fb60417d2714e12b
         except json.JSONDecodeError as e:
             logging.error(f"Failed to parse cloth/ID JSON file: {e}")
             continue
@@ -85,6 +154,10 @@ def merge_sub_datasets(dataset_configs, args, skip_logging=False):
         for item in attr_dict_raw:
             img_path = item.get('file_path', item.get('img_path', ''))
             pid = str(item.get('id', item.get('pid', 0)))
+<<<<<<< HEAD
+=======
+            # 获取衣物和身份描述
+>>>>>>> ae1d583f71d5b97df29d9414fb60417d2714e12b
             cloth_captions = cloth_dict.get(pid, [])
             id_captions = id_dict.get(pid, [])
             cloth_caption = cloth_captions[0] if cloth_captions else ''
@@ -106,25 +179,43 @@ def merge_sub_datasets(dataset_configs, args, skip_logging=False):
                 full_path = full_path.with_suffix(ext)
 
             if not full_path.exists():
+<<<<<<< HEAD
                 continue
 
             valid_images += 1
             is_matched = 1  # 默认值,稍后在训练集处理中调整
+=======
+                logging.debug(f"Image not found at {full_path}")
+                continue
+
+            valid_images += 1
+            is_matched = 1 if hasattr(args, 'is_train') and args.is_train else 1
+>>>>>>> ae1d583f71d5b97df29d9414fb60417d2714e12b
             if pid not in items_by_id:
                 items_by_id[pid] = []
             items_by_id[pid].append((str(full_path), cloth_caption, id_caption, pid, cam_id, is_matched))
 
         if invalid_pids:
+<<<<<<< HEAD
             logging.warning(f"Found {len(invalid_pids)} invalid PIDs in {dataset_name}")
         if not skip_logging:
             logging.info(f"Found {valid_images} valid images for {dataset_name}")
+=======
+            logging.warning(f"Found {len(invalid_pids)} invalid PIDs in {dataset_name}: {invalid_pids[:10]}")
+        logging.info(f"Found {valid_images} valid images for {dataset_name}")
+>>>>>>> ae1d583f71d5b97df29d9414fb60417d2714e12b
         if not items_by_id:
             logging.warning(f"No valid items found for {dataset_name}")
             continue
 
         # PID统计
         all_pids = [int(pid) for pid in items_by_id.keys()]
+<<<<<<< HEAD
 
+=======
+        logging.info(
+            f"{dataset_name} PID stats: min={min(all_pids)}, max={max(all_pids)}, unique={len(set(all_pids))}")
+>>>>>>> ae1d583f71d5b97df29d9414fb60417d2714e12b
 
         # 划分数据集
         all_ids = list(items_by_id.keys())
@@ -137,15 +228,21 @@ def merge_sub_datasets(dataset_configs, args, skip_logging=False):
         test_ids = all_ids[train_id_count:]
 
         if hasattr(args, 'is_train') and args.is_train:
+<<<<<<< HEAD
             # 训练集：统一PID映射,并生成正负样本对
             train_image_count = 0
             all_cloth_captions = [(pid, items_by_id[pid][0][1]) for pid in items_by_id.keys()]  # (pid, cloth_caption)
+=======
+            # 训练集：统一PID映射
+            train_image_count = 0
+>>>>>>> ae1d583f71d5b97df29d9414fb60417d2714e12b
             for pid in train_ids:
                 if pid not in global_pid_list:
                     global_pid_list[pid] = global_pid_counter
                     global_pid_counter += 1
                 mapped_pid = global_pid_list[pid]
                 for item in items_by_id[pid]:
+<<<<<<< HEAD
                     # 正样本：使用对应的 cloth_caption
                     pos_cloth_caption = item[1]
                     list_lines_all.append((item[0], pos_cloth_caption, item[2], mapped_pid, item[4], 1))
@@ -164,6 +261,16 @@ def merge_sub_datasets(dataset_configs, args, skip_logging=False):
             query_lines = []
             gallery_lines = []
 
+=======
+                    list_lines_all.append((item[0], item[1], item[2], mapped_pid, item[4], item[5]))
+                    train_image_count += 1
+            logging.info(f"{dataset_name} - Added to training set: {train_image_count} images")
+        else:
+            # 测试集：允许未见PID，继续分配索引
+            query_lines = []
+            gallery_lines = []
+
+>>>>>>> ae1d583f71d5b97df29d9414fb60417d2714e12b
             # 实现50% ID重叠
             overlap_ratio = 0.5
             overlap_id_count = int(len(test_ids) * overlap_ratio)
@@ -172,6 +279,10 @@ def merge_sub_datasets(dataset_configs, args, skip_logging=False):
             query_only_ids = non_overlap_ids[:len(non_overlap_ids) // 2]
             gallery_only_ids = non_overlap_ids[len(non_overlap_ids) // 2:]
 
+<<<<<<< HEAD
+=======
+            # 处理所有测试集PID
+>>>>>>> ae1d583f71d5b97df29d9414fb60417d2714e12b
             used_pids = set()
             for pid in overlap_ids:
                 if pid not in global_pid_list:
@@ -221,45 +332,99 @@ def merge_sub_datasets(dataset_configs, args, skip_logging=False):
                 args.gallery_data = []
             args.query_data.extend(query_lines)
             args.gallery_data.extend(gallery_lines)
+<<<<<<< HEAD
 
             common_ids = set(x[3] for x in query_lines) & set(x[3] for x in gallery_lines)
+=======
+            logging.info(f"{dataset_name} - Query set: {len(query_lines)} images, "
+                         f"{len(set(x[3] for x in query_lines))} IDs")
+            logging.info(f"{dataset_name} - Gallery set: {len(gallery_lines)} images, "
+                         f"{len(set(x[3] for x in gallery_lines))} IDs")
+            logging.info(f"{dataset_name} - Test PIDs range: [{min(used_pids) if used_pids else 0}, "
+                         f"{max(used_pids) if used_pids else 0}]")
+            common_ids = set(x[3] for x in query_lines) & set(x[3] for x in gallery_lines)
+            logging.info(f"{dataset_name} - Common IDs between query and gallery: {len(common_ids)}")
+>>>>>>> ae1d583f71d5b97df29d9414fb60417d2714e12b
             check_overlap(query_lines, gallery_lines)
 
     # 设置 num_classes
     args.num_classes = global_pid_counter
     args.global_pid_list = global_pid_list
+<<<<<<< HEAD
     if list_lines_all:
         mapped_pids = [x[3] for x in list_lines_all]
+=======
+    logging.info(f"Set args.num_classes = {args.num_classes}")
+    if list_lines_all:
+        mapped_pids = [x[3] for x in list_lines_all]
+        logging.info(f"PIDs range: min={min(mapped_pids)}, max={max(mapped_pids)}")
+>>>>>>> ae1d583f71d5b97df29d9414fb60417d2714e12b
         if min(mapped_pids) < 0 or max(mapped_pids) >= args.num_classes:
             raise ValueError(
                 f"Invalid PID range: min={min(mapped_pids)}, max={max(mapped_pids)}, expected [0, {args.num_classes - 1}]")
 
+<<<<<<< HEAD
     if not skip_logging:
         logging.info(f"Total data items loaded: {len(list_lines_all)}")
+=======
+    logging.info(f"Total data items loaded: {len(list_lines_all)}")
+>>>>>>> ae1d583f71d5b97df29d9414fb60417d2714e12b
     return list_lines_all
 
 
 class T2IReIDDataset(Dataset):
     """
+<<<<<<< HEAD
     T2I-ReID 数据集类,加载图像、衣物描述、身份描述和匹配标签
     """
     def __init__(self, data, args, transform=None):
+=======
+    T2I-ReID 数据集类，加载图像、衣物描述、身份描述和匹配标签
+    """
+
+    def __init__(self, data, args, transform=None):
+        """
+        初始化数据集
+
+        Args:
+            data: 数据列表，格式 [(img_path, cloth_caption, id_caption, pid, cam_id, is_matched), ...]
+            args: 命令行参数 (Namespace)
+            transform: 图像变换操作
+        """
+>>>>>>> ae1d583f71d5b97df29d9414fb60417d2714e12b
         self.data = data
         self.args = args
         self.transform = transform
 
     def __len__(self):
+<<<<<<< HEAD
         return len(self.data)
 
     def __getitem__(self, index):
         img_path, cloth_caption, id_caption, pid, cam_id, is_matched = self.data[index]
         img_path = Path(img_path)
 
+=======
+        """
+        返回数据集大小
+        """
+        return len(self.data)
+
+    def __getitem__(self, index):
+        """
+        获取单条数据
+        """
+        img_path, cloth_caption, id_caption, pid, cam_id, is_matched = self.data[index]
+        img_path = Path(img_path)
+
+        # 验证 PID
+>>>>>>> ae1d583f71d5b97df29d9414fb60417d2714e12b
         if pid < 0 or pid >= self.args.num_classes:
             logging.error(f"Invalid PID {pid} at index {index}, img_path: {img_path}")
             raise ValueError(f"PID {pid} out of range [0, {self.args.num_classes - 1}]")
 
         try:
+<<<<<<< HEAD
             # 使用更健壮的图像加载方式
             image = Image.open(img_path).convert('RGB')
             
@@ -272,39 +437,69 @@ class T2IReIDDataset(Dataset):
             # 创建一个随机噪声图像作为替代
             image_array = torch.rand(3, self.args.height, self.args.width)
             image = transforms.ToPILImage()(image_array)
+=======
+            image = Image.open(img_path).convert('RGB')
+        except Exception as e:
+            logging.warning(f"Failed to load image {img_path}: {e}")
+            image_array = torch.zeros(3, self.args.height, self.args.width)
+            image = Image.fromarray(image_array.numpy(), mode='RGB')
+>>>>>>> ae1d583f71d5b97df29d9414fb60417d2714e12b
 
         if self.transform is not None:
             image = self.transform(image)
 
+<<<<<<< HEAD
         # 确保文本描述不为None
         cloth_caption = cloth_caption if cloth_caption else ""
         id_caption = id_caption if id_caption else ""
 
         return (image, cloth_caption, id_caption, torch.tensor(pid, dtype=torch.long),
                 torch.tensor(cam_id, dtype=torch.long), torch.tensor(is_matched, dtype=torch.long))
+=======
+        return image, cloth_caption, id_caption, torch.tensor(pid, dtype=torch.long), torch.tensor(cam_id,
+                                                                                                   dtype=torch.long), torch.tensor(
+            is_matched, dtype=torch.long)
+>>>>>>> ae1d583f71d5b97df29d9414fb60417d2714e12b
 
 
 class DataBuilder_t2i:
     """
+<<<<<<< HEAD
     T2I-ReID 数据构建器,负责加载和划分数据集
     """
+=======
+    T2I-ReID 数据构建器，负责加载和划分数据集
+    """
+
+>>>>>>> ae1d583f71d5b97df29d9414fb60417d2714e12b
     def __init__(self, args, is_distributed=False):
+        """
+        初始化数据构建器，设置变换和参数
+        """
         self.args = args
         self.is_distributed = is_distributed
         self.dataset_configs = args.dataset_configs
+<<<<<<< HEAD
         
         # ViT预训练模型使用的归一化参数，将像素值从[0,1]映射到[-1,1]
+=======
+>>>>>>> ae1d583f71d5b97df29d9414fb60417d2714e12b
         self.transform_train = transforms.Compose([
             transforms.Resize((args.height, args.width)),
             transforms.RandomCrop((args.height, args.width), padding=4),
             transforms.RandomHorizontalFlip(p=0.5),
             transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
             transforms.ToTensor(),
+<<<<<<< HEAD
             transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])  # 归一化到[-1,1]范围
+=======
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+>>>>>>> ae1d583f71d5b97df29d9414fb60417d2714e12b
         ])
         self.transform_test = transforms.Compose([
             transforms.Resize((args.height, args.width)),
             transforms.ToTensor(),
+<<<<<<< HEAD
             transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])  # 归一化到[-1,1]范围
         ])
 
@@ -319,10 +514,40 @@ class DataBuilder_t2i:
                 for img_path, cloth_caption, id_caption, pid, cam_id, is_matched in list_lines]
 
     def build_dataset(self, data, is_train=False):
+=======
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        ])
+
+    def get_num_classes(self):
+        """
+        返回数据集的身份类别数
+        """
+        self.args.is_train = True
+        list_lines = merge_sub_datasets(self.dataset_configs, self.args)
+        return self.args.num_classes
+
+    def _load_data(self, list_lines):
+        """
+        加载数据项，转换为标准格式
+        """
+        return [(img_path, cloth_caption, id_caption, int(pid), int(cam_id), int(is_matched)) for
+                img_path, cloth_caption, id_caption, pid, cam_id, is_matched in list_lines]
+
+    def build_dataset(self, data, is_train=False):
+        """
+        构建数据集
+        """
+>>>>>>> ae1d583f71d5b97df29d9414fb60417d2714e12b
         transform = self.transform_train if is_train else self.transform_test
         return T2IReIDDataset(data, self.args, transform=transform)
 
     def _build_train_loader(self, data):
+<<<<<<< HEAD
+=======
+        """
+        构建训练数据加载器
+        """
+>>>>>>> ae1d583f71d5b97df29d9414fb60417d2714e12b
         if not data:
             logging.error("Training dataset is empty")
             raise ValueError("Training dataset is empty")
@@ -348,6 +573,12 @@ class DataBuilder_t2i:
         return train_loader, dataset
 
     def _build_test_loader(self, data, is_query=False):
+<<<<<<< HEAD
+=======
+        """
+        构建测试数据加载器
+        """
+>>>>>>> ae1d583f71d5b97df29d9414fb60417d2714e12b
         if not data:
             logging.error("Test dataset is empty")
             raise ValueError("Test dataset is empty")
@@ -373,6 +604,9 @@ class DataBuilder_t2i:
         return test_loader
 
     def build_data(self, is_train=False):
+        """
+        构建数据加载器
+        """
         self.args.is_train = is_train
         list_lines = merge_sub_datasets(self.dataset_configs, self.args)
         data = self._load_data(list_lines)

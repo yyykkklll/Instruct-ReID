@@ -14,6 +14,10 @@ from torch.backends import cudnn
 ROOT_DIR = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT_DIR))
 
+<<<<<<< HEAD
+=======
+# 导入 src 模块
+>>>>>>> ae1d583f71d5b97df29d9414fb60417d2714e12b
 from src.utils.serialization import save_checkpoint
 from src.models.pass_transformer_joint import T2IReIDModel
 from src.datasets.data_builder_t2i import DataBuilder_t2i
@@ -24,6 +28,14 @@ from src.utils.lr_scheduler import WarmupMultiStepLR
 def configuration():
     """
     解析命令行参数并加载 YAML 配置文件
+<<<<<<< HEAD
+=======
+
+    Returns:
+        tuple: (args, config)
+            - args: 命令行参数 (Namespace)
+            - config: YAML 配置文件内容 (dict)
+>>>>>>> ae1d583f71d5b97df29d9414fb60417d2714e12b
     """
     parser = argparse.ArgumentParser(description="Train T2I-ReID model")
     parser.add_argument('--config', default=str(ROOT_DIR / 'configs' / 'config_cuhk_pedes.yaml'),
@@ -98,7 +110,11 @@ def configuration():
             }
         ]
 
+<<<<<<< HEAD
     # 确保所有路径使用 Path 对象
+=======
+    # 确保所有路径使用 Path 对象，保持跨平台兼容性
+>>>>>>> ae1d583f71d5b97df29d9414fb60417d2714e12b
     args.bert_base_path = str(Path(args.bert_base_path))
     args.vit_pretrained = str(Path(args.vit_pretrained))
     args.logs_dir = str(Path(args.logs_dir))
@@ -119,18 +135,34 @@ class Runner:
     """
     运行类，管理 T2I-ReID 模型的训练和评估
     """
+<<<<<<< HEAD
     def __init__(self, args, config):
+=======
+
+    def __init__(self, args, config):
+        """
+        初始化 Runner，设置设备和混合精度训练
+
+        Args:
+            args: 命令行参数 (Namespace)
+            config: YAML 配置文件内容 (dict)
+        """
+>>>>>>> ae1d583f71d5b97df29d9414fb60417d2714e12b
         self.args = args
         self.config = config
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.scaler = torch.amp.GradScaler('cuda', enabled=args.fp16)
 
     def build_optimizer(self, model):
+        """
+        构建优化器
+        """
         params = [p for p in model.parameters() if p.requires_grad]
         optimizer = torch.optim.Adam(params, lr=self.args.lr, weight_decay=self.args.weight_decay)
         return optimizer
 
     def build_scheduler(self, optimizer):
+<<<<<<< HEAD
         if self.args.scheduler == 'cosine':
             return torch.optim.lr_scheduler.CosineAnnealingLR(
                 optimizer, T_max=self.args.epochs, eta_min=1e-6
@@ -154,6 +186,35 @@ class Runner:
         model.load_state_dict(model_dict, strict=False)
 
     def run(self):
+=======
+        """
+        构建学习率调度器
+        """
+        return WarmupMultiStepLR(
+            optimizer, self.args.milestones, gamma=0.1,
+            warmup_factor=0.1, warmup_iters=self.args.warmup_step
+        )
+
+    def load_param(self, model, trained_path):
+        """
+        加载模型参数
+        """
+        param_dict = torch.load(trained_path, map_location=self.device, weights_only=True)
+        if 'state_dict' in param_dict:
+            param_dict = param_dict['state_dict']
+        elif 'model' in param_dict:
+            param_dict = param_dict['model']
+        model_dict = model.state_dict()
+        for i in param_dict:
+            if i in model_dict and model_dict[i].shape == param_dict[i].shape:
+                model_dict[i] = param_dict[i]
+        model.load_state_dict(model_dict, strict=False)
+
+    def run(self):
+        """
+        执行训练和评估流程
+        """
+>>>>>>> ae1d583f71d5b97df29d9414fb60417d2714e12b
         args = self.args
         config = self.config
         if torch.cuda.is_available():
@@ -171,12 +232,20 @@ class Runner:
                 logging.StreamHandler(sys.stdout)
             ]
         )
+<<<<<<< HEAD
+=======
+        logging.info(f"Args: {vars(args)}")
+>>>>>>> ae1d583f71d5b97df29d9414fb60417d2714e12b
 
         # 构建数据集
         data_builder = DataBuilder_t2i(args, is_distributed=False)
         args.num_classes = data_builder.get_num_classes()
         config['model']['num_classes'] = args.num_classes
+<<<<<<< HEAD
         logging.info(f"Set num_classes = {args.num_classes}")
+=======
+        logging.info(f"Set config.model.num_classes = {args.num_classes}")
+>>>>>>> ae1d583f71d5b97df29d9414fb60417d2714e12b
 
         train_loader, _ = data_builder.build_data(is_train=True)
         query_loader, gallery_loader = data_builder.build_data(is_train=False)
@@ -227,4 +296,8 @@ if __name__ == '__main__':
     cudnn.deterministic = True
     cudnn.benchmark = False
     runner = Runner(args, config)
+<<<<<<< HEAD
     runner.run()
+=======
+    runner.run()
+>>>>>>> ae1d583f71d5b97df29d9414fb60417d2714e12b

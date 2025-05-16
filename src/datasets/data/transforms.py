@@ -90,7 +90,7 @@ class RandomSizedRectCrop(object):
 
 
 class RandomErasing(object):
-    """ 
+    """
     Args:
          probability: The probability that the Random Erasing operation will be performed.
          sl: Minimum proportion of erased area against input image.
