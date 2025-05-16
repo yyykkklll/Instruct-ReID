@@ -17,7 +17,7 @@ from src.utils.serialization import load_checkpoint
 def main_worker(args):
     # 项目根目录定位
     ROOT_DIR = Path(__file__).parent.parent  # 从 scripts/ 到 TextGuidedReID/
-
+    
     log_dir = os.path.join(ROOT_DIR, "logs", os.path.dirname(args.resume).split(os.sep)[-1])
     checkpoint_name = os.path.basename(args.resume).split('.')[0]
     sys.stdout = Logger(os.path.join(log_dir, f'{checkpoint_name}_log_test.txt'))

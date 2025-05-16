@@ -1,13 +1,8 @@
 model:
   bert_base_path: pretrained/bert-base-uncased
   vit_pretrained: pretrained/vit-base-patch16-224
-<<<<<<< HEAD
   grl_alpha: 1.0 # GRL 缩放系数
   num_classes: 8000 # 身份类别数
-=======
-  grl_alpha: 1.0  # GRL 缩放系数
-  num_classes: 8000  # 身份类别数
->>>>>>> ae1d583f71d5b97df29d9414fb60417d2714e12b
   fusion:
     type: attention_gated
     dim: 256
@@ -17,7 +12,6 @@ model:
 
 # 解纠缠模块配置
 disentangle:
-<<<<<<< HEAD
   id_projection_dim: 768 # 身份投影头输出维度
   cloth_projection_dim: 768 # 衣物投影头输出维度
   loss_weights:
@@ -36,24 +30,6 @@ lr: 0.0001
 weight_decay: 0.001
 epochs: 80
 milestones: [30, 60]
-=======
-  id_projection_dim: 768  # 身份投影头输出维度
-  cloth_projection_dim: 768  # 衣物投影头输出维度
-  loss_weights:
-    info_nce: 1.0  # 图像-文本匹配损失
-    cls: 0.5  # 身份分类损失
-    bio: 0.1  # 生物对比损失
-    cloth: 0.5  # 衣物对比损失
-    cloth_adv: 0.5  # 衣物对抗损失
-
-# 训练参数
-optimizer: Adam
-scheduler: step_lr
-lr: 0.001
-weight_decay: 0.0005
-epochs: 80
-milestones: [20, 40]
->>>>>>> ae1d583f71d5b97df29d9414fb60417d2714e12b
 warmup_step: 500
 batch_size: 128
 workers: 0
@@ -68,11 +44,7 @@ logs_dir: logs
 dataset_configs:
   - name: CUHK-PEDES
     root: data/CUHK-PEDES
-<<<<<<< HEAD
     json_file: data/CUHK-PEDES/annotations/caption_all.json
-=======
-    json_file: data/CUHK-PEDES//annotations/caption_all.json
->>>>>>> ae1d583f71d5b97df29d9414fb60417d2714e12b
     cloth_json: data/CUHK-PEDES/annotations/caption_cloth.json
     id_json: data/CUHK-PEDES/annotations/caption_id.json
   - name: ICFG-PEDES
@@ -84,8 +56,4 @@ dataset_configs:
     root: data/RSTPReid
     json_file: data/RSTPReid/annotations/data_captions.json
     cloth_json: data/RSTPReid/annotations/caption_cloth.json
-<<<<<<< HEAD
     id_json: data/RSTPReid/annotations/caption_id.json
-=======
-    id_json: data/RSTPReid/annotations/caption_id.json
->>>>>>> ae1d583f71d5b97df29d9414fb60417d2714e12b

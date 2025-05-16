@@ -74,7 +74,6 @@ PRETRAINED_INIT_CONFIGURATION = {
     "wietsedv/bert-base-dutch-cased": {"do_lower_case": False},
 }
 
-
 def load_vocab(vocab_file):
     """Loads a vocabulary file into a dictionary."""
     print(f"Attempting to load vocab file: {vocab_file}")
@@ -99,7 +98,6 @@ def load_vocab(vocab_file):
         raise ValueError(f"Vocab file {vocab_file} contains no valid tokens after processing!")
     return vocab
 
-
 def whitespace_tokenize(text):
     """Runs basic whitespace cleaning and splitting on a piece of text."""
     text = text.strip()
@@ -107,7 +105,6 @@ def whitespace_tokenize(text):
         return []
     tokens = text.split()
     return tokens
-
 
 class BertTokenizer(PreTrainedTokenizer):
     vocab_files_names = VOCAB_FILES_NAMES
@@ -178,7 +175,6 @@ class BertTokenizer(PreTrainedTokenizer):
             )
         self.wordpiece_tokenizer = WordpieceTokenizer(vocab=self.vocab, unk_token=self.unk_token)
         print("BertTokenizer initialization completed")
-
     @property
     def do_lower_case(self):
         return self.basic_tokenizer.do_lower_case
@@ -227,7 +223,7 @@ class BertTokenizer(PreTrainedTokenizer):
         return list(map(self.convert_input_ids_to_text, bs_input_ids))
 
     def build_inputs_with_special_tokens(
-            self, token_ids_0: List[int], token_ids_1: Optional[List[int]] = None
+        self, token_ids_0: List[int], token_ids_1: Optional[List[int]] = None
     ) -> List[int]:
         if token_ids_1 is None:
             return [self.cls_token_id] + token_ids_0
@@ -236,8 +232,7 @@ class BertTokenizer(PreTrainedTokenizer):
         return cls + token_ids_0 + sep + token_ids_1 + sep
 
     def get_special_tokens_mask(
-            self, token_ids_0: List[int], token_ids_1: Optional[List[int]] = None,
-            already_has_special_tokens: bool = False
+        self, token_ids_0: List[int], token_ids_1: Optional[List[int]] = None, already_has_special_tokens: bool = False
     ) -> List[int]:
 
         if already_has_special_tokens:
@@ -253,7 +248,7 @@ class BertTokenizer(PreTrainedTokenizer):
         return [1] + ([0] * len(token_ids_0)) + [1]
 
     def create_token_type_ids_from_sequences(
-            self, token_ids_0: List[int], token_ids_1: Optional[List[int]] = None
+        self, token_ids_0: List[int], token_ids_1: Optional[List[int]] = None
     ) -> List[int]:
         sep = [self.sep_token_id]
         cls = [self.cls_token_id]
@@ -280,7 +275,6 @@ class BertTokenizer(PreTrainedTokenizer):
                 writer.write(token + "\n")
                 index += 1
         return (vocab_file,)
-
 
 class BasicTokenizer(object):
     def __init__(self, do_lower_case=True, never_split=None, tokenize_chinese_chars=True, strip_accents=None):
@@ -360,14 +354,14 @@ class BasicTokenizer(object):
 
     def _is_chinese_char(self, cp):
         if (
-                (cp >= 0x4E00 and cp <= 0x9FFF)
-                or (cp >= 0x3400 and cp <= 0x4DBF)  #
-                or (cp >= 0x20000 and cp <= 0x2A6DF)  #
-                or (cp >= 0x2A700 and cp <= 0x2B73F)  #
-                or (cp >= 0x2B740 and cp <= 0x2B81F)  #
-                or (cp >= 0x2B820 and cp <= 0x2CEAF)  #
-                or (cp >= 0xF900 and cp <= 0xFAFF)
-                or (cp >= 0x2F800 and cp <= 0x2FA1F)  #
+            (cp >= 0x4E00 and cp <= 0x9FFF)
+            or (cp >= 0x3400 and cp <= 0x4DBF)  #
+            or (cp >= 0x20000 and cp <= 0x2A6DF)  #
+            or (cp >= 0x2A700 and cp <= 0x2B73F)  #
+            or (cp >= 0x2B740 and cp <= 0x2B81F)  #
+            or (cp >= 0x2B820 and cp <= 0x2CEAF)  #
+            or (cp >= 0xF900 and cp <= 0xFAFF)
+            or (cp >= 0x2F800 and cp <= 0x2FA1F)  #
         ):  #
             return True
 
@@ -385,7 +379,6 @@ class BasicTokenizer(object):
             else:
                 output.append(char)
         return "".join(output)
-
 
 class WordpieceTokenizer(object):
     """Runs WordPiece tokenization."""
