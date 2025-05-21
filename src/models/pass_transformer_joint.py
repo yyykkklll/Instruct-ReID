@@ -6,121 +6,143 @@ from transformers import BertModel, BertTokenizer, ViTModel
 from ..utils.serialization import copy_state_dict
 from .fusion import get_fusion_module
 
+# 设置transformers库的日志级别为ERROR，减少不必要的日志输出
 logging.getLogger("transformers").setLevel(logging.ERROR)
 
+class DisentangleModule(nn.Module):
+    def __init__(self, dim):
+        """
+        特征分离模块，将输入特征分解为身份特征和服装特征。
 
-class GradientReversalLayer(torch.autograd.Function):
-    @staticmethod
-    def forward(ctx, x, alpha):
-        ctx.alpha = alpha
-        return x.view_as(x)
+        Args:
+            dim (int): 输入特征的维度。
+        """
+        super().__init__()
+        self.id_linear = nn.Linear(dim, dim)  # 身份特征线性变换
+        self.id_attn = nn.MultiheadAttention(embed_dim=dim, num_heads=4)  # 身份特征自注意力
+        self.id_norm = nn.LayerNorm(dim)  # 身份特征归一化
+        self.cloth_linear = nn.Linear(dim, dim)  # 服装特征线性变换
+        self.cloth_attn = nn.MultiheadAttention(embed_dim=dim, num_heads=4)  # 服装特征自注意力
+        self.cloth_norm = nn.LayerNorm(dim)  # 服装特征归一化
+        self.id_cross_attn = nn.MultiheadAttention(embed_dim=dim, num_heads=4)  # 身份-服装交叉注意力
+        self.cloth_cross_attn = nn.MultiheadAttention(embed_dim=dim, num_heads=4)  # 服装-身份交叉注意力
+        self.id_cross_norm = nn.LayerNorm(dim)  # 身份交叉特征归一化
+        self.cloth_cross_norm = nn.LayerNorm(dim)  # 服装交叉特征归一化
+        self.gate = nn.Sequential(
+            nn.Linear(dim*2, dim),  # 门控机制输入维度为2*dim
+            nn.Sigmoid()  # 输出门控权重
+        )
 
-    @staticmethod
-    def backward(ctx, grad_output):
-        return -ctx.alpha * grad_output, None
+    def forward(self, x):
+        """
+        前向传播，将输入特征分解为身份特征和服装特征，并通过门控机制加权。
 
+        Args:
+            x (torch.Tensor): 输入特征，形状为 [batch_size, dim]。
+
+        Returns:
+            tuple: (id_feat, cloth_feat, gate)，身份特征、服装特征和门控权重。
+        """
+        batch_size, dim = x.size()
+        id_feat = self.id_linear(x)
+        id_feat = id_feat.unsqueeze(0)  # [1, batch_size, dim]
+        id_attn, _ = self.id_attn(query=id_feat, key=id_feat, value=id_feat)
+        id_feat = id_attn.squeeze(0)  # [batch_size, dim]
+        id_feat = id_feat + x  # 残差连接
+        id_feat = self.id_norm(id_feat)
+        cloth_feat = self.cloth_linear(x)
+        cloth_feat = cloth_feat.unsqueeze(0)
+        cloth_attn, _ = self.cloth_attn(query=cloth_feat, key=cloth_feat, value=cloth_feat)
+        cloth_feat = cloth_attn.squeeze(0)
+        cloth_feat = cloth_feat + x
+        cloth_feat = self.cloth_norm(cloth_feat)
+        id_cross, _ = self.id_cross_attn(query=id_feat.unsqueeze(0), key=cloth_feat.unsqueeze(0), value=cloth_feat.unsqueeze(0))
+        cloth_cross, _ = self.cloth_cross_attn(query=cloth_feat.unsqueeze(0), key=id_feat.unsqueeze(0), value=id_feat.unsqueeze(0))
+        id_cross = id_cross.squeeze(0)
+        cloth_cross = cloth_cross.squeeze(0)
+        id_feat = self.id_cross_norm(id_cross + id_feat)
+        cloth_feat = self.cloth_cross_norm(cloth_cross + cloth_feat)
+        gate = self.gate(torch.cat([id_feat, cloth_feat], dim=-1))
+        id_feat = gate * id_feat
+        cloth_feat = (1 - gate) * cloth_feat
+        return id_feat, cloth_feat, gate
 
 class T2IReIDModel(nn.Module):
     def __init__(self, net_config):
+        """
+        文本-图像行人重识别模型，结合BERT和ViT进行多模态特征提取与融合。
+
+        Args:
+            net_config (dict): 模型配置字典，包含BERT路径、ViT路径、融合模块配置等。
+        """
         super().__init__()
         self.net_config = net_config
-        self.alpha = net_config.get('grl_alpha', 1.0)  # GRL 缩放因子
-
-        # 获取预训练模型路径
         bert_base_path = Path(net_config.get('bert_base_path', 'pretrained/bert-base-uncased'))
         vit_base_path = Path(net_config.get('vit_pretrained', 'pretrained/vit-base-patch16-224'))
         fusion_config = net_config.get('fusion', {})
         num_classes = net_config.get('num_classes', 8000)
 
+        # 验证预训练模型路径
         if not bert_base_path.exists() or not vit_base_path.exists():
             raise FileNotFoundError(f"Model path not found: {bert_base_path} or {vit_base_path}")
 
-        # 初始化编码器
-        self.tokenizer = BertTokenizer.from_pretrained(str(bert_base_path))
+        # 初始化文本编码器和分词器
+        self.tokenizer = BertTokenizer.from_pretrained(str(bert_base_path), do_lower_case=True, use_fast=True)
         self.text_encoder = BertModel.from_pretrained(str(bert_base_path))
-        self.text_width = self.text_encoder.config.hidden_size  # 768 for bert-base-uncased
+        self.text_width = self.text_encoder.config.hidden_size  # BERT隐藏层维度（768）
+
+        # 初始化图像编码器
         self.visual_encoder = ViTModel.from_pretrained(str(vit_base_path))
 
-        # 优化1：升级投影头为3层MLP
-        # 目的：增强身份和服装特征分离,提高解纠缠能力
-        self.id_projection = nn.Sequential(
-            nn.Linear(self.text_width, 512),
-            nn.BatchNorm1d(512),
-            nn.ReLU(),
-            nn.Dropout(0.2),
-            nn.Linear(512, 256),
-            nn.BatchNorm1d(256),
-            nn.ReLU(),
-            nn.Dropout(0.2),
-            nn.Linear(256, self.text_width),
-            nn.BatchNorm1d(self.text_width)
-        )
-        self.cloth_projection = nn.Sequential(
-            nn.Linear(self.text_width, 512),
-            nn.BatchNorm1d(512),
-            nn.ReLU(),
-            nn.Dropout(0.2),
-            nn.Linear(512, 256),
-            nn.BatchNorm1d(256),
-            nn.ReLU(),
-            nn.Dropout(0.2),
-            nn.Linear(256, self.text_width),
-            nn.BatchNorm1d(self.text_width)
-        )
+        # 初始化特征分离模块
+        self.disentangle = DisentangleModule(dim=self.text_width)
+
+        # 初始化身份分类器
         self.id_classifier = nn.Linear(self.text_width, num_classes)
 
-        # 优化2：增强空间注意力模块
-        # 目的：通过多头注意力和残差连接提高对服装区域的关注
-        self.spatial_attention = nn.ModuleList([
-            nn.Sequential(
-                nn.Linear(self.text_width, self.text_width // 4),  # 降维以提高效率
-                nn.ReLU(),
-                nn.Linear(self.text_width // 4, 1),  # 每个patch的分数
-                nn.Sigmoid()
-            ) for _ in range(4)  # 4个注意力头
-        ])
-        self.attention_norm = nn.LayerNorm(self.text_width)  # 归一化注意力输出
-        self.attention_dropout = nn.Dropout(0.1)  # 防止过拟合
-
-        # 共享和模态特定的MLP
+        # 初始化共享MLP
         self.shared_mlp = nn.Linear(self.text_width, 512)
+
+        # 初始化图像特征MLP
         self.image_mlp = nn.Sequential(
             nn.BatchNorm1d(512), nn.ReLU(), nn.Dropout(0.2),
             nn.Linear(512, 256), nn.BatchNorm1d(256), nn.ReLU(), nn.Dropout(0.2),
             nn.Linear(256, 256)
         )
+
+        # 初始化文本特征MLP
         self.text_mlp = nn.Sequential(
             nn.BatchNorm1d(512), nn.ReLU(), nn.Dropout(0.2),
             nn.Linear(512, 256), nn.BatchNorm1d(256), nn.ReLU(), nn.Dropout(0.2),
             nn.Linear(256, 256)
         )
 
-        # 融合模块
+        # 新增文本特征自注意力模块
+        self.text_attn = nn.MultiheadAttention(embed_dim=self.text_width, num_heads=4, dropout=0.1)
+        self.text_attn_norm = nn.LayerNorm(self.text_width)
+
+        # 初始化融合模块
         self.fusion = get_fusion_module(fusion_config) if fusion_config else None
         self.feat_dim = fusion_config.get("output_dim", 256) if fusion_config else 256
+
+        # 初始化可学习的缩放参数
         self.scale = nn.Parameter(torch.ones(1), requires_grad=True)
 
-        # Patch token融合权重
-        self.patch_weight = nn.Parameter(torch.tensor(0.3), requires_grad=True)
-        self.cls_weight = nn.Parameter(torch.tensor(0.7), requires_grad=True)
+        # 日志记录初始化信息
+        logging.info(f"Initialized model with scale: {self.scale.item():.4f}, fusion: {fusion_config.get('type', 'None')}")
 
-        logging.info(
-            f"Initialized model with scale: {self.scale.item():.4f}, "
-            f"fusion: {fusion_config.get('type', 'None')}, "
-            f"patch_weight: {self.patch_weight.item():.4f}, "
-            f"cls_weight: {self.cls_weight.item():.4f}"
-        )
-
-    def update_alpha(self, epoch):
-        """
-        动态更新GRL alpha参数,延长预热期
-        """
-        self.alpha = min(1.0, 0.1 + epoch * 0.01)  # 在100个epoch内线性增加到1.0
-        logging.info(f"Updated GRL alpha to {self.alpha:.4f} at epoch {epoch}")
+        # 文本分词结果缓存
+        self.text_cache = {}
 
     def encode_image(self, image):
         """
-        优化的图像编码：聚合patch tokens,应用增强的空间注意力
+        编码图像，提取图像特征并进行标准化。
+
+        Args:
+            image (torch.Tensor): 输入图像，形状为 [batch_size, channels, height, width] 或更高维。
+
+        Returns:
+            torch.Tensor: 标准化后的图像嵌入，形状为 [batch_size, 256]。
         """
         if image is None:
             return None
@@ -128,37 +150,9 @@ class T2IReIDModel(nn.Module):
         if image.dim() == 5:
             image = image.squeeze(-1)
         image = image.to(device)
-        
-        # ViT编码
         image_outputs = self.visual_encoder(image)
-        image_embeds = image_outputs.last_hidden_state  # [batch_size, 197, 768]
-
-        # 聚合patch tokens
-        cls_token = image_embeds[:, 0, :]  # [batch_size, 768]
-        patch_tokens = image_embeds[:, 1:, :]  # [batch_size, 196, 768]
-
-        # 使用多头机制增强空间注意力
-        attention_weights = []
-        for head in self.spatial_attention:
-            weights = head(patch_tokens).squeeze(-1)  # [batch_size, 196]
-            weights = torch.softmax(weights, dim=-1)
-            attention_weights.append(weights)
-        # 平均多头权重
-        attention_weights = torch.mean(torch.stack(attention_weights), dim=0)  # [batch_size, 196]
-        attention_weights = self.attention_dropout(attention_weights)
-        
-        # 使用注意力聚合patch tokens
-        patch_agg = torch.einsum('bnd,bn->bd', patch_tokens, attention_weights)  # [batch_size, 768]
-        patch_agg = self.attention_norm(patch_agg)  # 归一化以提高稳定性
-
-        # 融合CLS token和patch特征
-        image_embeds = self.cls_weight * cls_token + self.patch_weight * patch_agg
-        image_embeds = torch.nn.functional.normalize(image_embeds, dim=-1)
-
-        # 使用3层MLP进行身份投影
-        id_embeds = self.id_projection(image_embeds)
-        
-        # 投影到统一空间
+        image_embeds = image_outputs.last_hidden_state[:, 0, :]  # 提取CLS token
+        id_embeds, _, _ = self.disentangle(image_embeds)
         image_embeds = self.shared_mlp(id_embeds)
         image_embeds = self.image_mlp(image_embeds)
         image_embeds = torch.nn.functional.normalize(image_embeds, dim=-1)
@@ -166,110 +160,120 @@ class T2IReIDModel(nn.Module):
 
     def encode_text(self, instruction):
         """
-        文本编码：保持不变,兼容未来优化
+        编码文本，提取文本特征并进行标准化，新增多头自注意力模块增强特征交互。
+
+        Args:
+            instruction (str or list): 输入文本，单个字符串或字符串列表。
+
+        Returns:
+            torch.Tensor: 标准化后的文本嵌入，形状为 [batch_size, 256] 或 [256]（单文本）。
         """
         if instruction is None:
             return None
         device = next(self.parameters()).device
-        
         if isinstance(instruction, list):
             texts = instruction
         else:
             texts = [instruction]
-            
-        tokenized = self.tokenizer(
-            texts, 
-            padding='max_length', 
-            max_length=100,
-            truncation=True, 
-            return_tensors="pt",
-            return_attention_mask=True
-        ).to(device)
-        
-        text_outputs = self.text_encoder(
-            input_ids=tokenized.input_ids,
-            attention_mask=tokenized.attention_mask
+
+        # 检查缓存以复用分词结果
+        cache_key = tuple(texts)
+        if cache_key in self.text_cache:
+            tokenized = self.text_cache[cache_key]
+        else:
+            tokenized = self.tokenizer(
+                texts,
+                padding='max_length',
+                max_length=64,  # 适合CUHK-PEDES数据集的文本长度
+                truncation=True,
+                return_tensors="pt",
+                return_attention_mask=True
+            )
+            self.text_cache[cache_key] = tokenized
+
+        input_ids = tokenized['input_ids'].to(device)
+        attention_mask = tokenized['attention_mask'].to(device)
+
+        # BERT编码，禁用梯度以提升效率
+        with torch.no_grad():
+            text_outputs = self.text_encoder(input_ids, attention_mask=attention_mask)
+        text_embeds = text_outputs.last_hidden_state  # [batch_size, seq_len, hidden_size]
+
+        # 多头自注意力处理，增强序列特征交互
+        text_embeds = text_embeds.transpose(0, 1)  # [seq_len, batch_size, hidden_size]
+        text_attn, _ = self.text_attn(
+            query=text_embeds,
+            key=text_embeds,
+            value=text_embeds,
+            key_padding_mask=~attention_mask.bool()  # 转换为布尔掩码，忽略填充token
         )
-        
-        text_embeds = text_outputs.last_hidden_state[:, 0, :]
+        text_embeds = text_attn.transpose(0, 1) + text_embeds.transpose(0, 1)  # 残差连接
+        text_embeds = self.text_attn_norm(text_embeds)  # 归一化
+
+        # 均值池化，结合attention_mask忽略填充token
+        attention_mask = attention_mask.unsqueeze(-1)  # [batch_size, seq_len, 1]
+        text_embeds = torch.sum(text_embeds * attention_mask, dim=1) / torch.sum(attention_mask, dim=1)
+        # 形状: [batch_size, hidden_size]
+
+        # 降维和标准化
         text_embeds = self.shared_mlp(text_embeds)
         text_embeds = self.text_mlp(text_embeds)
         text_embeds = torch.nn.functional.normalize(text_embeds, dim=-1)
-        
+
         if not isinstance(instruction, list):
-            return text_embeds
+            text_embeds = text_embeds.squeeze(0)
         return text_embeds
 
     def forward(self, image=None, cloth_instruction=None, id_instruction=None):
         """
-        前向传播：整合优化的图像编码,保持输出格式
+        前向传播，处理图像和文本输入，输出多模态特征和分类结果。
+
+        Args:
+            image (torch.Tensor, optional): 输入图像，形状为 [batch_size, channels, height, width]。
+            cloth_instruction (str or list, optional): 服装描述文本。
+            id_instruction (str or list, optional): 身份描述文本。
+
+        Returns:
+            tuple: (image_embeds, id_text_embeds, fused_embeds, id_logits, id_embeds,
+                    cloth_embeds, cloth_text_embeds, cloth_image_embeds, gate, gate_weights)
         """
         device = next(self.parameters()).device
-        id_logits, id_embeds, cloth_embeds = None, None, None
-
+        id_logits, id_embeds, cloth_embeds, gate = None, None, None, None
         if image is not None:
             if image.dim() == 5:
                 image = image.squeeze(-1)
             image = image.to(device)
             image_outputs = self.visual_encoder(image)
-            image_embeds = image_outputs.last_hidden_state
-
-            # 聚合patch tokens
-            cls_token = image_embeds[:, 0, :]
-            patch_tokens = image_embeds[:, 1:, :]
-
-            # 增强空间注意力
-            attention_weights = []
-            for head in self.spatial_attention:
-                weights = head(patch_tokens).squeeze(-1)
-                weights = torch.softmax(weights, dim=-1)
-                attention_weights.append(weights)
-            attention_weights = torch.mean(torch.stack(attention_weights), dim=0)
-            attention_weights = self.attention_dropout(attention_weights)
-            
-            patch_agg = torch.einsum('bnd,bn->bd', patch_tokens, attention_weights)
-            patch_agg = self.attention_norm(patch_agg)
-
-            # 融合CLS token和patch特征
-            image_embeds = self.cls_weight * cls_token + self.patch_weight * patch_agg
-            image_embeds = torch.nn.functional.normalize(image_embeds, dim=-1)
-
-            # 使用3层MLP投影头
-            id_embeds = self.id_projection(image_embeds)
+            image_embeds = image_outputs.last_hidden_state[:, 0, :]
+            id_embeds, cloth_embeds, gate = self.disentangle(image_embeds)
             id_logits = self.id_classifier(id_embeds)
-
-            cloth_embeds = self.cloth_projection(image_embeds)
-            cloth_embeds = GradientReversalLayer.apply(cloth_embeds, self.alpha)
-            cloth_embeds = torch.nn.functional.relu(cloth_embeds)
-
-            # 投影到统一维度
             image_embeds = self.shared_mlp(id_embeds)
             image_embeds = self.image_mlp(image_embeds)
             image_embeds = torch.nn.functional.normalize(image_embeds, dim=-1)
-
             cloth_image_embeds = self.shared_mlp(cloth_embeds)
             cloth_image_embeds = self.image_mlp(cloth_image_embeds)
             cloth_image_embeds = torch.nn.functional.normalize(cloth_image_embeds, dim=-1)
         else:
             image_embeds = None
             cloth_image_embeds = None
-
-        # 文本编码
         cloth_text_embeds = self.encode_text(cloth_instruction)
         id_text_embeds = self.encode_text(id_instruction)
-
-        # 特征融合
-        fused_embeds = None
+        fused_embeds, gate_weights = None, None
         if self.fusion and image_embeds is not None and id_text_embeds is not None:
-            fused_embeds = self.fusion(image_embeds, id_text_embeds)
+            fused_embeds, gate_weights = self.fusion(image_embeds, id_text_embeds)
             fused_embeds = self.scale * torch.nn.functional.normalize(fused_embeds, dim=-1)
-
         return (image_embeds, id_text_embeds, fused_embeds, id_logits, id_embeds,
-                cloth_embeds, cloth_text_embeds, cloth_image_embeds)
+                cloth_embeds, cloth_text_embeds, cloth_image_embeds, gate, gate_weights)
 
     def load_param(self, trained_path):
         """
-        加载检查点：确保跨平台兼容性
+        加载预训练模型参数。
+
+        Args:
+            trained_path (str): 预训练模型文件路径。
+
+        Returns:
+            T2IReIDModel: 加载参数后的模型。
         """
         trained_path = Path(trained_path)
         checkpoint = torch.load(trained_path, map_location='cpu', weights_only=True)

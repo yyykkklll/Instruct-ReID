@@ -9,6 +9,7 @@ from pathlib import Path
 import torch
 import yaml
 from torch.backends import cudnn
+from torch.cuda.amp import GradScaler  # Updated import for mixed precision
 
 # 定义项目根目录并添加到 sys.path
 ROOT_DIR = Path(__file__).parent.parent
@@ -123,7 +124,13 @@ class Runner:
         self.args = args
         self.config = config
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.scaler = torch.amp.GradScaler('cuda', enabled=args.fp16)
+        # Initialize GradScaler for mixed precision training
+        if self.device.type == 'cuda':
+            self.scaler = GradScaler(enabled=args.fp16)
+        else:
+            self.scaler = None  # No scaler needed for CPU
+            if args.fp16:
+                logging.warning("FP16 is enabled but no CUDA device is available. Disabling mixed precision.")
 
     def build_optimizer(self, model):
         params = [p for p in model.parameters() if p.requires_grad]
@@ -165,7 +172,7 @@ class Runner:
         log_file = Path(args.logs_dir) / 'log.txt'
         logging.basicConfig(
             level=logging.INFO,
-            format='%(message)s', 
+            format='%(message)s',
             handlers=[
                 logging.FileHandler(log_file, mode='w'),
                 logging.StreamHandler(sys.stdout)

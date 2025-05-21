@@ -4,9 +4,11 @@ model:
   grl_alpha: 1.0 # GRL 缩放系数
   num_classes: 8000 # 身份类别数
   fusion:
-    type: attention_gated
+    type: enhanced_mamba
     dim: 256
-    num_heads: 4
+    d_state: 16
+    d_conv: 4
+    num_layers: 2
     output_dim: 256
     dropout: 0.1
 
@@ -22,6 +24,7 @@ disentangle:
     cloth_adv: 0.1 # 衣物对抗损失
     cloth_match: 1.0 # 衣物匹配损失
     decouple: 0.1 # 身份-衣物解耦损失
+    gate_regularization: 0.01 # 门控正则化损失
 
 # 训练参数
 optimizer: Adam

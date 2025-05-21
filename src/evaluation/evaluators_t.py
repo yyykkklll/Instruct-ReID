@@ -9,7 +9,7 @@ from ..utils.meters import AverageMeter
 
 class Evaluator_t2i:
     """
-    文本到图像检索评估器，用于计算mAP和CMC等性能指标
+    文本到图像检索评估器,用于计算mAP和CMC等性能指标
     """
 
     def __init__(self, model, args=None):
@@ -76,6 +76,10 @@ class Evaluator_t2i:
         features = {}
         labels = {}
         time_meter = AverageMeter()
+        image_weight_stats = AverageMeter()  # 跟踪图像权重的均值
+        text_weight_stats = AverageMeter()   # 跟踪文本权重的均值
+        all_image_batch_means = []  # 新增：用于存储所有批次的图像权重均值
+        all_text_batch_means = []   # 新增：用于存储所有批次的文本权重均值
         with torch.no_grad():
             for i, data in enumerate(data_loader):
                 start_time = time.time()
@@ -86,18 +90,27 @@ class Evaluator_t2i:
                     if use_id_text:
                         if id_only:
                             # 仅使用身份文本特征
-                            _, _, fused_feats, _, _, _, _, _ = self.model(imgs, cloth_instruction=None,
-                                                                          id_instruction=id_captions)
+                            outputs = self.model(imgs, cloth_instruction=None, id_instruction=id_captions)
+                            fused_feats, gate_weights = outputs[2], outputs[-1]
                         else:
                             # 使用完整特征（衣物+身份）
-                            _, _, fused_feats, _, _, _, _, _ = self.model(imgs, cloth_instruction=cloth_captions,
-                                                                          id_instruction=id_captions)
+                            outputs = self.model(imgs, cloth_instruction=cloth_captions, id_instruction=id_captions)
+                            fused_feats, gate_weights = outputs[2], outputs[-1]
                     else:
                         # 不使用任何文本特征
-                        _, _, fused_feats, _, _, _, _, _ = self.model(imgs, cloth_instruction=None, id_instruction=None)
+                        outputs = self.model(imgs, cloth_instruction=None, id_instruction=None)
+                        fused_feats, gate_weights = outputs[2], outputs[-1]
                 except AttributeError:
                     logging.error("模型不支持融合特征提取")
                     raise
+                # 记录gate_weights的统计信息
+                if gate_weights is not None:
+                    image_weight_mean_batch = gate_weights[:, 0].mean().item()
+                    text_weight_mean_batch = gate_weights[:, 1].mean().item()
+                    image_weight_stats.update(image_weight_mean_batch)
+                    text_weight_stats.update(text_weight_mean_batch)
+                    all_image_batch_means.append(image_weight_mean_batch) # 修改：收集每个批次的均值
+                    all_text_batch_means.append(text_weight_mean_batch)   # 修改：收集每个批次的均值
                 batch_size = len(imgs)
                 start_idx = i * data_loader.batch_size
                 end_idx = min(start_idx + batch_size, len(data_loader.dataset.data))
@@ -107,6 +120,15 @@ class Evaluator_t2i:
                     features[img_path] = feat.cpu()
                     labels[img_path] = pid.cpu().item()
                 time_meter.update(time.time() - start_time)
+            # 记录gate_weights的平均值和标准差
+            if image_weight_stats.count > 0 and text_weight_stats.count > 0:
+                image_weight_avg = image_weight_stats.avg
+                text_weight_avg = text_weight_stats.avg
+                # 修改：使用收集到的批次均值列表计算标准差
+                image_weight_std = (sum((x - image_weight_avg) ** 2 for x in all_image_batch_means) / image_weight_stats.count) ** 0.5 if image_weight_stats.count > 0 else 0.0
+                text_weight_std = (sum((x - text_weight_avg) ** 2 for x in all_text_batch_means) / text_weight_stats.count) ** 0.5 if text_weight_stats.count > 0 else 0.0
+                logging.info(f"Gate weights statistics: Image weight mean={image_weight_avg:.4f}, std={image_weight_std:.4f}; "
+                             f"Text weight mean={text_weight_avg:.4f}, std={text_weight_std:.4f}")
         return features, labels
 
     def pairwise_distance(self, query_features, gallery_features):
@@ -147,11 +169,11 @@ class Evaluator_t2i:
         cmc_scores, mAP = self.eval_func(distmat, q_pids=query_ids, g_pids=gallery_ids)
     
         # 应用调整系数
-        adjusted_mAP = min(mAP * 2.0, 1.0)
+        adjusted_mAP = min(mAP, 1.0)
         adjusted_cmc_scores = cmc_scores.copy()
-        adjusted_cmc_scores[0] = min(cmc_scores[0] * 1.8, 1.0)
-        adjusted_cmc_scores[4] = min(cmc_scores[4] * 1.5, 1.0)
-        adjusted_cmc_scores[9] = min(cmc_scores[9] * 1.5, 1.0)
+        adjusted_cmc_scores[0] = min(cmc_scores[0], 1.0)
+        adjusted_cmc_scores[4] = min(cmc_scores[4], 1.0)
+        adjusted_cmc_scores[9] = min(cmc_scores[9], 1.0)
     
         return {
             f'{prefix}mAP': adjusted_mAP,

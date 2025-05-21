@@ -49,12 +49,12 @@ pip install -r requirements.txt
 
 📌 依赖列表见 `requirements.txt`，包括但不限于：
 
-- `transformers`
+**- `transformers`
 - `timm`
 - `opencv-python`
 - `h5py`
 - `tensorboardX`
-- `scikit-learn`
+- `scikit-learn`**
 
 ### 📁 数据集准备
 
