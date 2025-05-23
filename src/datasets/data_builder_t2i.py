@@ -164,8 +164,8 @@ def merge_sub_datasets(dataset_configs, args, skip_logging=False):
             query_lines = []
             gallery_lines = []
 
-            # 实现50% ID重叠
-            overlap_ratio = 0.5
+            # 实现30% ID重叠
+            overlap_ratio = 0.3
             overlap_id_count = int(len(test_ids) * overlap_ratio)
             overlap_ids = test_ids[:overlap_id_count]
             non_overlap_ids = test_ids[overlap_id_count:]

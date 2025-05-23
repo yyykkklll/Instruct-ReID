@@ -127,8 +127,8 @@ class Evaluator_t2i:
                 # 修改：使用收集到的批次均值列表计算标准差
                 image_weight_std = (sum((x - image_weight_avg) ** 2 for x in all_image_batch_means) / image_weight_stats.count) ** 0.5 if image_weight_stats.count > 0 else 0.0
                 text_weight_std = (sum((x - text_weight_avg) ** 2 for x in all_text_batch_means) / text_weight_stats.count) ** 0.5 if text_weight_stats.count > 0 else 0.0
-                logging.info(f"Gate weights statistics: Image weight mean={image_weight_avg:.4f}, std={image_weight_std:.4f}; "
-                             f"Text weight mean={text_weight_avg:.4f}, std={text_weight_std:.4f}")
+                # logging.info(f"Gate weights statistics: Image weight mean={image_weight_avg:.4f}, std={image_weight_std:.4f}; "
+                #              f"Text weight mean={text_weight_avg:.4f}, std={text_weight_std:.4f}")
         return features, labels
 
     def pairwise_distance(self, query_features, gallery_features):

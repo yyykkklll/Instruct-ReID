@@ -8,13 +8,6 @@ from ..evaluation.evaluators_t import Evaluator_t2i
 from ..utils.serialization import save_checkpoint
 from ..utils.meters import AverageMeter
 
-
-# class SilentStartTqdm(tqdm):
-#     def display(self, msg=None, pos=None):
-#         if self.n >= self.total:
-#             super().display(msg, pos)
-
-
 class T2IReIDTrainer:
     def __init__(self, model, args):
         self.model = model
@@ -44,10 +37,6 @@ class T2IReIDTrainer:
                 raise ValueError("cloth_captions must be a list of strings")
             if not isinstance(id_captions, (list, tuple)) or not all(isinstance(c, str) for c in id_captions):
                 raise ValueError("id_captions must be a list of strings")
-            # logging.info(f"Sample cloth captions: {cloth_captions[:2]}")
-            # logging.info(f"Sample id captions: {id_captions[:2]}")
-            # print(f"Sample cloth captions: {cloth_captions[:2]}")
-            # print(f"Sample ID captions: {id_captions[:2]}")
         with autocast(enabled=self.args.fp16):
             model_outputs = self.model(image=image, cloth_instruction=cloth_captions, id_instruction=id_captions)
             if len(model_outputs) == 10:
@@ -82,7 +71,7 @@ class T2IReIDTrainer:
                     if gate_weights is not None:
                         image_weight_mean = gate_weights[:, 0].mean().item()
                         text_weight_mean = gate_weights[:, 1].mean().item()
-                        logging.info(f"Similarity computation - Gate weights: Image mean={image_weight_mean:.4f}, Text mean={text_weight_mean:.4f}")
+                        # logging.info(f"Similarity computation - Gate weights: Image mean={image_weight_mean:.4f}, Text mean={text_weight_mean:.4f}")
                     return pos_sim, neg_sim, None, scale
         self.model.train()
         return None, None, None, None
@@ -155,7 +144,12 @@ class T2IReIDTrainer:
                     'epoch': epoch
                 }, fpath=str(save_path))
                 logging.info(f"Saved checkpoint at: {save_path}")
-
+    
+                # 删除非最佳、非最终的旧检查点
+                for ckpt in Path(checkpoint_dir).glob("checkpoint_epoch_*.pth"):
+                    if ckpt != save_path and ckpt != best_checkpoint and ckpt.name != f"checkpoint_epoch_{self.args.epochs:03d}.pth":
+                        ckpt.unlink()
+    
                 if query_loader and gallery_loader:
                     evaluator = Evaluator_t2i(self.model, args=self.args)
                     metrics = evaluator.evaluate(

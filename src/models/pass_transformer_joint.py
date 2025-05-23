@@ -9,63 +9,113 @@ from .fusion import get_fusion_module
 # 设置transformers库的日志级别为ERROR，减少不必要的日志输出
 logging.getLogger("transformers").setLevel(logging.ERROR)
 
+
 class DisentangleModule(nn.Module):
     def __init__(self, dim):
         """
-        特征分离模块，将输入特征分解为身份特征和服装特征。
+        特征分离模块，将输入特征分解为身份特征和服装特征，支持序列输入。
 
         Args:
-            dim (int): 输入特征的维度。
+            dim (int): 输入特征的维度（每个 token 的维度）。
         """
         super().__init__()
         self.id_linear = nn.Linear(dim, dim)  # 身份特征线性变换
-        self.id_attn = nn.MultiheadAttention(embed_dim=dim, num_heads=4)  # 身份特征自注意力
-        self.id_norm = nn.LayerNorm(dim)  # 身份特征归一化
+        # 修改为 6 层多头自注意力
+        self.id_attn_layers = nn.ModuleList([
+            nn.MultiheadAttention(embed_dim=dim, num_heads=4) for _ in range(6)
+        ])
+        self.id_norm_layers = nn.ModuleList([
+            nn.LayerNorm(dim) for _ in range(6)
+        ])
         self.cloth_linear = nn.Linear(dim, dim)  # 服装特征线性变换
-        self.cloth_attn = nn.MultiheadAttention(embed_dim=dim, num_heads=4)  # 服装特征自注意力
-        self.cloth_norm = nn.LayerNorm(dim)  # 服装特征归一化
-        self.id_cross_attn = nn.MultiheadAttention(embed_dim=dim, num_heads=4)  # 身份-服装交叉注意力
-        self.cloth_cross_attn = nn.MultiheadAttention(embed_dim=dim, num_heads=4)  # 服装-身份交叉注意力
-        self.id_cross_norm = nn.LayerNorm(dim)  # 身份交叉特征归一化
-        self.cloth_cross_norm = nn.LayerNorm(dim)  # 服装交叉特征归一化
+        # 修改为 6 层多头自注意力
+        self.cloth_attn_layers = nn.ModuleList([
+            nn.MultiheadAttention(embed_dim=dim, num_heads=4) for _ in range(6)
+        ])
+        self.cloth_norm_layers = nn.ModuleList([
+            nn.LayerNorm(dim) for _ in range(6)
+        ])
+        # 修改为 3 层交叉注意力
+        self.id_cross_attn_layers = nn.ModuleList([
+            nn.MultiheadAttention(embed_dim=dim, num_heads=4) for _ in range(3)
+        ])
+        self.id_cross_norm_layers = nn.ModuleList([
+            nn.LayerNorm(dim) for _ in range(3)
+        ])
+        self.cloth_cross_attn_layers = nn.ModuleList([
+            nn.MultiheadAttention(embed_dim=dim, num_heads=4) for _ in range(3)
+        ])
+        self.cloth_cross_norm_layers = nn.ModuleList([
+            nn.LayerNorm(dim) for _ in range(3)
+        ])
         self.gate = nn.Sequential(
-            nn.Linear(dim*2, dim),  # 门控机制输入维度为2*dim
+            nn.Linear(dim * 2, dim),  # 门控机制输入维度为2*dim
             nn.Sigmoid()  # 输出门控权重
         )
 
     def forward(self, x):
         """
-        前向传播，将输入特征分解为身份特征和服装特征，并通过门控机制加权。
+        前向传播，将输入序列特征分解为身份特征和服装特征，并通过门控机制加权。
 
         Args:
-            x (torch.Tensor): 输入特征，形状为 [batch_size, dim]。
+            x (torch.Tensor): 输入特征，形状为 [batch_size, seq_len, dim]。
 
         Returns:
-            tuple: (id_feat, cloth_feat, gate)，身份特征、服装特征和门控权重。
+            tuple: (id_feat, cloth_feat, gate)，身份特征、服装特征和门控权重，形状均为 [batch_size, dim]。
         """
-        batch_size, dim = x.size()
-        id_feat = self.id_linear(x)
-        id_feat = id_feat.unsqueeze(0)  # [1, batch_size, dim]
-        id_attn, _ = self.id_attn(query=id_feat, key=id_feat, value=id_feat)
-        id_feat = id_attn.squeeze(0)  # [batch_size, dim]
-        id_feat = id_feat + x  # 残差连接
-        id_feat = self.id_norm(id_feat)
+        batch_size, seq_len, dim = x.size()
+
+        # 身份特征处理
+        id_feat = self.id_linear(x)  # [batch_size, seq_len, dim]
+        id_feat = id_feat.transpose(0, 1)  # [seq_len, batch_size, dim]
+        # 6 层自注意力
+        for attn, norm in zip(self.id_attn_layers, self.id_norm_layers):
+            attn_output, _ = attn(query=id_feat, key=id_feat, value=id_feat)
+            id_feat = attn_output + id_feat  # 残差连接
+            id_feat = norm(id_feat)
+        id_feat = id_feat.transpose(0, 1)  # [batch_size, seq_len, dim]
+
+        # 服装特征处理
         cloth_feat = self.cloth_linear(x)
-        cloth_feat = cloth_feat.unsqueeze(0)
-        cloth_attn, _ = self.cloth_attn(query=cloth_feat, key=cloth_feat, value=cloth_feat)
-        cloth_feat = cloth_attn.squeeze(0)
-        cloth_feat = cloth_feat + x
-        cloth_feat = self.cloth_norm(cloth_feat)
-        id_cross, _ = self.id_cross_attn(query=id_feat.unsqueeze(0), key=cloth_feat.unsqueeze(0), value=cloth_feat.unsqueeze(0))
-        cloth_cross, _ = self.cloth_cross_attn(query=cloth_feat.unsqueeze(0), key=id_feat.unsqueeze(0), value=id_feat.unsqueeze(0))
-        id_cross = id_cross.squeeze(0)
-        cloth_cross = cloth_cross.squeeze(0)
-        id_feat = self.id_cross_norm(id_cross + id_feat)
-        cloth_feat = self.cloth_cross_norm(cloth_cross + cloth_feat)
-        gate = self.gate(torch.cat([id_feat, cloth_feat], dim=-1))
+        cloth_feat = cloth_feat.transpose(0, 1)
+        # 6 层自注意力
+        for attn, norm in zip(self.cloth_attn_layers, self.cloth_norm_layers):
+            attn_output, _ = attn(query=cloth_feat, key=cloth_feat, value=cloth_feat)
+            cloth_feat = attn_output + cloth_feat  # 残差连接
+            cloth_feat = norm(cloth_feat)
+        cloth_feat = cloth_feat.transpose(0, 1)  # [batch_size, seq_len, dim]
+
+        # 交叉注意力
+        # 3 层身份-服装交叉注意力
+        for attn, norm in zip(self.id_cross_attn_layers, self.id_cross_norm_layers):
+            cross_output, _ = attn(
+                query=id_feat.transpose(0, 1),
+                key=cloth_feat.transpose(0, 1),
+                value=cloth_feat.transpose(0, 1)
+            )
+            id_feat = cross_output.transpose(0, 1) + id_feat  # 残差连接
+            id_feat = norm(id_feat)
+
+        # 3 层服装-身份交叉注意力
+        for attn, norm in zip(self.cloth_cross_attn_layers, self.cloth_cross_norm_layers):
+            cross_output, _ = attn(
+                query=cloth_feat.transpose(0, 1),
+                key=id_feat.transpose(0, 1),
+                value=id_feat.transpose(0, 1)
+            )
+            cloth_feat = cross_output.transpose(0, 1) + cloth_feat  # 残差连接
+            cloth_feat = norm(cloth_feat)
+
+        # 全局均值池化
+        id_feat = id_feat.mean(dim=1)  # [batch_size, dim]
+        cloth_feat = cloth_feat.mean(dim=1)  # [batch_size, dim]
+
+        # 门控机制
+        gate = self.gate(torch.cat([id_feat, cloth_feat], dim=-1))  # [batch_size, dim]
         id_feat = gate * id_feat
         cloth_feat = (1 - gate) * cloth_feat
         return id_feat, cloth_feat, gate
+
 
 class T2IReIDModel(nn.Module):
     def __init__(self, net_config):
@@ -117,9 +167,13 @@ class T2IReIDModel(nn.Module):
             nn.Linear(256, 256)
         )
 
-        # 新增文本特征自注意力模块
-        self.text_attn = nn.MultiheadAttention(embed_dim=self.text_width, num_heads=4, dropout=0.1)
-        self.text_attn_norm = nn.LayerNorm(self.text_width)
+        # 修改为 3 层文本自注意力模块
+        self.text_attn_layers = nn.ModuleList([
+            nn.MultiheadAttention(embed_dim=self.text_width, num_heads=4, dropout=0.1) for _ in range(3)
+        ])
+        self.text_attn_norm_layers = nn.ModuleList([
+            nn.LayerNorm(self.text_width) for _ in range(3)
+        ])
 
         # 初始化融合模块
         self.fusion = get_fusion_module(fusion_config) if fusion_config else None
@@ -129,14 +183,15 @@ class T2IReIDModel(nn.Module):
         self.scale = nn.Parameter(torch.ones(1), requires_grad=True)
 
         # 日志记录初始化信息
-        logging.info(f"Initialized model with scale: {self.scale.item():.4f}, fusion: {fusion_config.get('type', 'None')}")
+        logging.info(
+            f"Initialized model with scale: {self.scale.item():.4f}, fusion: {fusion_config.get('type', 'None')}")
 
         # 文本分词结果缓存
         self.text_cache = {}
 
     def encode_image(self, image):
         """
-        编码图像，提取图像特征并进行标准化。
+        编码图像，提取图像特征并进行标准化，使用 ViT 整个序列。
 
         Args:
             image (torch.Tensor): 输入图像，形状为 [batch_size, channels, height, width] 或更高维。
@@ -151,8 +206,8 @@ class T2IReIDModel(nn.Module):
             image = image.squeeze(-1)
         image = image.to(device)
         image_outputs = self.visual_encoder(image)
-        image_embeds = image_outputs.last_hidden_state[:, 0, :]  # 提取CLS token
-        id_embeds, _, _ = self.disentangle(image_embeds)
+        image_embeds = image_outputs.last_hidden_state  # [batch_size, seq_len, hidden_size]
+        id_embeds, _, _ = self.disentangle(image_embeds)  # [batch_size, hidden_size]
         image_embeds = self.shared_mlp(id_embeds)
         image_embeds = self.image_mlp(image_embeds)
         image_embeds = torch.nn.functional.normalize(image_embeds, dim=-1)
@@ -160,7 +215,7 @@ class T2IReIDModel(nn.Module):
 
     def encode_text(self, instruction):
         """
-        编码文本，提取文本特征并进行标准化，新增多头自注意力模块增强特征交互。
+        编码文本，提取文本特征并进行标准化，使用所有 token 进行全局建模。
 
         Args:
             instruction (str or list): 输入文本，单个字符串或字符串列表。
@@ -199,18 +254,20 @@ class T2IReIDModel(nn.Module):
             text_outputs = self.text_encoder(input_ids, attention_mask=attention_mask)
         text_embeds = text_outputs.last_hidden_state  # [batch_size, seq_len, hidden_size]
 
-        # 多头自注意力处理，增强序列特征交互
+        # 3 层自注意力处理
         text_embeds = text_embeds.transpose(0, 1)  # [seq_len, batch_size, hidden_size]
-        text_attn, _ = self.text_attn(
-            query=text_embeds,
-            key=text_embeds,
-            value=text_embeds,
-            key_padding_mask=~attention_mask.bool()  # 转换为布尔掩码，忽略填充token
-        )
-        text_embeds = text_attn.transpose(0, 1) + text_embeds.transpose(0, 1)  # 残差连接
-        text_embeds = self.text_attn_norm(text_embeds)  # 归一化
+        for attn, norm in zip(self.text_attn_layers, self.text_attn_norm_layers):
+            attn_output, _ = attn(
+                query=text_embeds,
+                key=text_embeds,
+                value=text_embeds,
+                key_padding_mask=~attention_mask.bool()  # 忽略填充 token
+            )
+            text_embeds = attn_output + text_embeds  # 残差连接
+            text_embeds = norm(text_embeds)
+        text_embeds = text_embeds.transpose(0, 1)  # [batch_size, seq_len, hidden_size]
 
-        # 均值池化，结合attention_mask忽略填充token
+        # 均值池化，结合 attention_mask 忽略填充 token
         attention_mask = attention_mask.unsqueeze(-1)  # [batch_size, seq_len, 1]
         text_embeds = torch.sum(text_embeds * attention_mask, dim=1) / torch.sum(attention_mask, dim=1)
         # 形状: [batch_size, hidden_size]
@@ -244,8 +301,8 @@ class T2IReIDModel(nn.Module):
                 image = image.squeeze(-1)
             image = image.to(device)
             image_outputs = self.visual_encoder(image)
-            image_embeds = image_outputs.last_hidden_state[:, 0, :]
-            id_embeds, cloth_embeds, gate = self.disentangle(image_embeds)
+            image_embeds = image_outputs.last_hidden_state  # [batch_size, seq_len, hidden_size]
+            id_embeds, cloth_embeds, gate = self.disentangle(image_embeds)  # [batch_size, hidden_size]
             id_logits = self.id_classifier(id_embeds)
             image_embeds = self.shared_mlp(id_embeds)
             image_embeds = self.image_mlp(image_embeds)

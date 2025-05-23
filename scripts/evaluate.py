@@ -129,10 +129,10 @@ def main():
         checkpoint_path=None
     )
     logger.info("评估结果 (capped at 1.0):")
-    logger.info(f"mAP:    {metrics['mAP']:.4f}")
-    logger.info(f"Rank-1: {metrics['rank1']:.4f}")
-    logger.info(f"Rank-5: {metrics['rank5']:.4f}")
-    logger.info(f"Rank-10: {metrics['rank10']:.4f}")
+    logger.info(f"mAP:    {metrics['mAP']:.4f} ({metrics['mAP']*100:.2f}%)")
+    logger.info(f"Rank-1: {metrics['rank1']:.4f} ({metrics['rank1']*100:.2f}%)")
+    logger.info(f"Rank-5: {metrics['rank5']:.4f} ({metrics['rank5']*100:.2f}%)")
+    logger.info(f"Rank-10: {metrics['rank10']:.4f} ({metrics['rank10']*100:.2f}%)")
     logger.info(f"Total evaluation time: {time.time() - start_time:.2f}s")
     logger.info("Evaluation completed")
 
