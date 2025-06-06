@@ -1,7 +1,10 @@
 # 🔍 基于文本指导的 ReID 模型
 
-本项目基于 **ViT + BERT + 门控融合机制 + 身份-衣物解纠缠** 架构，实现了 **基于文本指导的行人重识别（Text-to-Image ReID）**。  
-通过结合视觉与语言信息，模型在多个公开数据集上表现优异，具备较强的泛化能力和解释性。
+本项目基于 **ViT + BERT + Mamba SSM状态空间融合 + 身份-衣物解纠缠** 架构，实现了 **基于文本指导的行人重识别（Text-to-Image ReID）**。  通过结合视觉与语言信息，模型在多个公开数据集上表现优异，具备较强的泛化能力和解释性。以下是模型结构:
+
+![](D:\Text-based-Person-Retrieval_V3\img\model.png)
+
+![](D:\Text-based-Person-Retrieval_V3\img\fusion.png)
 
 ------
 
@@ -35,13 +38,39 @@ v3/
 
 ### 📦 环境依赖
 
-请先安装 PyTorch（根据 CUDA 版本）：
+1.请先安装 PyTorch（**安装Pytorch2.6 (CUDA 12.8) 必须大于等于2.6**）：
 
 ```bash
-pip install torch==2.4.1+cu121 torchvision==0.19.1+cu121 torchaudio==2.4.1+cu121 --extra-index-url https://download.pytorch.org/whl/cu121
+pip install torch==2.6.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
 ```
 
-然后安装其他依赖：
+2.**安装Mamba SSM**
+
+```python
+git clone https://github.com/state-spaces/mamba.git
+cd mamba
+pip install torch packaging ninja
+pip install -e .
+```
+
+**注意事项**：
+
+若出现错误:
+
+```
+ImportError: selective_scan_cuda.so: undefined symbol: _ZN3c107WarningC1...
+```
+
+重复执行以下命令尝试安装：
+
+```
+cd mamba
+find . -name "*.so" -delete
+python mamba_ssm/ops/build.py
+python -c "import mamba_ssm; print(mamba_ssm.__version__)"
+```
+
+3.然后安装其他依赖：
 
 ```bash
 pip install -r requirements.txt
