@@ -2,9 +2,9 @@
 
 本项目基于 **ViT + BERT + Mamba SSM状态空间融合 + 身份-衣物解纠缠** 架构，实现了 **基于文本指导的行人重识别（Text-to-Image ReID）**。  通过结合视觉与语言信息，模型在多个公开数据集上表现优异，具备较强的泛化能力和解释性。以下是模型结构:
 
-![](D:\Text-based-Person-Retrieval_V3\img\model.png)
+![](./img/model.png)
 
-![](D:\Text-based-Person-Retrieval_V3\img\fusion.png)
+![](./img/fusion.png)
 
 ------
 
