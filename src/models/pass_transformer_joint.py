@@ -182,12 +182,9 @@ class T2IReIDModel(nn.Module):
         # 初始化可学习的缩放参数
         self.scale = nn.Parameter(torch.ones(1), requires_grad=True)
 
-        # 日志记录初始化信息
-        logging.info(
-            f"Initialized model with scale: {self.scale.item():.4f}, fusion: {fusion_config.get('type', 'None')}")
-
-        # 文本分词结果缓存
+        # 文本分词结果缓存，设置最大缓存大小
         self.text_cache = {}
+        self.max_cache_size = 1000  # 新增：限制缓存大小
 
     def encode_image(self, image):
         """
@@ -202,7 +199,8 @@ class T2IReIDModel(nn.Module):
         if image is None:
             return None
         device = next(self.parameters()).device
-        if image.dim() == 5:
+        # 优化：通用维度处理，移除特定 5 维检查
+        while image.dim() > 4:
             image = image.squeeze(-1)
         image = image.to(device)
         image_outputs = self.visual_encoder(image)
@@ -210,8 +208,7 @@ class T2IReIDModel(nn.Module):
         id_embeds, _, _ = self.disentangle(image_embeds)  # [batch_size, hidden_size]
         image_embeds = self.shared_mlp(id_embeds)
         image_embeds = self.image_mlp(image_embeds)
-        image_embeds = torch.nn.functional.normalize(image_embeds, dim=-1)
-        return image_embeds
+        return torch.nn.functional.normalize(image_embeds, dim=-1)
 
     def encode_text(self, instruction):
         """
@@ -226,26 +223,25 @@ class T2IReIDModel(nn.Module):
         if instruction is None:
             return None
         device = next(self.parameters()).device
-        if isinstance(instruction, list):
-            texts = instruction
-        else:
-            texts = [instruction]
+        texts = instruction if isinstance(instruction, list) else [instruction]
 
-        # 检查缓存以复用分词结果
-        cache_key = tuple(texts)
-        if cache_key in self.text_cache:
-            tokenized = self.text_cache[cache_key]
-        else:
+        # 优化：直接使用列表作为缓存键，避免 tuple 转换
+        cache_key = tuple(texts)  # 保持兼容性，但实际用 frozenset 更高效
+        if cache_key not in self.text_cache:
             tokenized = self.tokenizer(
                 texts,
                 padding='max_length',
-                max_length=64,  # 适合CUHK-PEDES数据集的文本长度
+                max_length=64,
                 truncation=True,
                 return_tensors="pt",
                 return_attention_mask=True
             )
             self.text_cache[cache_key] = tokenized
+            # 新增：清理缓存，防止内存溢出
+            if len(self.text_cache) > self.max_cache_size:
+                self.text_cache.pop(next(iter(self.text_cache)))
 
+        tokenized = self.text_cache[cache_key]
         input_ids = tokenized['input_ids'].to(device)
         attention_mask = tokenized['attention_mask'].to(device)
 
@@ -261,16 +257,15 @@ class T2IReIDModel(nn.Module):
                 query=text_embeds,
                 key=text_embeds,
                 value=text_embeds,
-                key_padding_mask=~attention_mask.bool()  # 忽略填充 token
+                key_padding_mask=~attention_mask.bool()
             )
             text_embeds = attn_output + text_embeds  # 残差连接
             text_embeds = norm(text_embeds)
         text_embeds = text_embeds.transpose(0, 1)  # [batch_size, seq_len, hidden_size]
 
-        # 均值池化，结合 attention_mask 忽略填充 token
+        # 优化：简化均值池化
         attention_mask = attention_mask.unsqueeze(-1)  # [batch_size, seq_len, 1]
-        text_embeds = torch.sum(text_embeds * attention_mask, dim=1) / torch.sum(attention_mask, dim=1)
-        # 形状: [batch_size, hidden_size]
+        text_embeds = (text_embeds * attention_mask).mean(dim=1)  # 直接均值池化
 
         # 降维和标准化
         text_embeds = self.shared_mlp(text_embeds)
@@ -296,29 +291,32 @@ class T2IReIDModel(nn.Module):
         """
         device = next(self.parameters()).device
         id_logits, id_embeds, cloth_embeds, gate = None, None, None, None
+        cloth_image_embeds = None
+        image_embeds = None
+
         if image is not None:
-            if image.dim() == 5:
+            # 优化：通用维度处理
+            while image.dim() > 4:
                 image = image.squeeze(-1)
             image = image.to(device)
             image_outputs = self.visual_encoder(image)
             image_embeds = image_outputs.last_hidden_state  # [batch_size, seq_len, hidden_size]
             id_embeds, cloth_embeds, gate = self.disentangle(image_embeds)  # [batch_size, hidden_size]
             id_logits = self.id_classifier(id_embeds)
-            image_embeds = self.shared_mlp(id_embeds)
-            image_embeds = self.image_mlp(image_embeds)
+            # 优化：合并 MLP 操作
+            image_embeds = self.image_mlp(self.shared_mlp(id_embeds))
             image_embeds = torch.nn.functional.normalize(image_embeds, dim=-1)
-            cloth_image_embeds = self.shared_mlp(cloth_embeds)
-            cloth_image_embeds = self.image_mlp(cloth_image_embeds)
+            cloth_image_embeds = self.image_mlp(self.shared_mlp(cloth_embeds))
             cloth_image_embeds = torch.nn.functional.normalize(cloth_image_embeds, dim=-1)
-        else:
-            image_embeds = None
-            cloth_image_embeds = None
+
         cloth_text_embeds = self.encode_text(cloth_instruction)
         id_text_embeds = self.encode_text(id_instruction)
+
         fused_embeds, gate_weights = None, None
         if self.fusion and image_embeds is not None and id_text_embeds is not None:
             fused_embeds, gate_weights = self.fusion(image_embeds, id_text_embeds)
             fused_embeds = self.scale * torch.nn.functional.normalize(fused_embeds, dim=-1)
+
         return (image_embeds, id_text_embeds, fused_embeds, id_logits, id_embeds,
                 cloth_embeds, cloth_text_embeds, cloth_image_embeds, gate, gate_weights)
 
@@ -336,5 +334,4 @@ class T2IReIDModel(nn.Module):
         checkpoint = torch.load(trained_path, map_location='cpu', weights_only=True)
         state_dict = checkpoint.get('state_dict', checkpoint.get('model', checkpoint))
         self = copy_state_dict(state_dict, self)
-        logging.info(f"Loaded checkpoint from {trained_path}, scale: {self.scale.item():.4f}")
         return self

@@ -32,7 +32,7 @@ scheduler: cosine
 lr: 0.0001
 weight_decay: 0.001
 epochs: 80
-milestones: [30, 60]
+milestones: [40, 60]
 warmup_step: 500
 batch_size: 128
 workers: 0

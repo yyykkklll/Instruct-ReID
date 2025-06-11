@@ -5,6 +5,7 @@ import time
 import torch
 import yaml
 import logging
+import json
 
 ROOT_DIR = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT_DIR))
@@ -14,27 +15,12 @@ from src.datasets.data_builder_t2i import DataBuilder_t2i
 from src.evaluation.evaluators_t import Evaluator_t2i
 
 
-class StreamToLogger:
-    """
-    将标准输出重定向到日志记录器
-    """
-
-    def __init__(self, logger, level=logging.INFO):
-        self.logger = logger
-        self.level = level
-        self.linebuf = ''
-
-    def write(self, buf):
-        for line in buf.rstrip().splitlines():
-            self.logger.log(self.level, line.rstrip())
-
-    def flush(self):
-        pass
-
-
 def parse_args():
     """
-    解析命令行参数并加载 YAML 配置文件
+    解析命令行参数并加载 YAML 配置文件。
+
+    Returns:
+        argparse.Namespace: 解析后的参数
     """
     parser = argparse.ArgumentParser(description="Evaluate T2I-ReID model")
     parser.add_argument('--config', default=str(ROOT_DIR / 'configs' / 'config_cuhk_pedes.yaml'),
@@ -49,92 +35,101 @@ def parse_args():
     parser.add_argument('--fp16', action='store_true', help='Use mixed precision evaluation')
     parser.add_argument('--logs-dir', type=str, default=str(ROOT_DIR / 'logs'), help='Directory for logs')
     args = parser.parse_args()
-    with open(args.config, encoding='utf-8') as f:
+
+    # 加载 YAML 配置文件
+    config_path = Path(args.config)
+    if not config_path.exists():
+        raise FileNotFoundError(f"Config file not found at: {config_path}")
+    with config_path.open('r', encoding='utf-8') as f:
         config = yaml.safe_load(f)
+
+    # 覆盖默认参数
     for k, v in config.items():
         if not hasattr(args, k) or getattr(args, k) == parser.get_default(k):
             setattr(args, k, v)
-    if args.dataset_configs:
-        dataset_configs = []
-        for cfg in args.dataset_configs:
-            parsed = eval(cfg)
-            if isinstance(parsed, list):
-                dataset_configs.extend(parsed)
-            else:
-                dataset_configs.append(parsed)
-        args.dataset_configs = dataset_configs
-    args.logs_dir = str(Path(args.logs_dir))
-    args.root = str(Path(args.root))
-    args.checkpoint = str(Path(args.checkpoint))
+
+    # 解析数据集配置（优化：使用 json.loads 替代 eval）
+    dataset_configs = []
+    for cfg in args.dataset_configs:
+        try:
+            parsed = json.loads(cfg)
+            dataset_configs.extend(parsed if isinstance(parsed, list) else [parsed])
+        except json.JSONDecodeError as e:
+            logging.error(f"Failed to parse dataset config: {cfg}, error: {e}")
+            raise
+    args.dataset_configs = dataset_configs
+
+    # 统一路径并验证（优化：合并检查）
+    paths_to_check = {
+        'logs_dir': Path(args.logs_dir),
+        'root': Path(args.root),
+        'checkpoint': Path(args.checkpoint)
+    }
+    for name, path in paths_to_check.items():
+        if not path.exists():
+            raise FileNotFoundError(f"{name} not found at: {path}")
+        setattr(args, name, str(path))
+
     return args
 
 
 def main():
     """
-    执行 T2I-ReID 模型评估并记录日志
+    执行 T2I-ReID 模型评估并记录日志。
     """
     args = parse_args()
     Path(args.logs_dir).mkdir(parents=True, exist_ok=True)
-    log_file = str(Path(args.logs_dir) / 'log.txt')
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(message)s',
         handlers=[
-            logging.FileHandler(log_file, mode='a'),
+            logging.FileHandler(Path(args.logs_dir) / 'log.txt', mode='a'),
             logging.StreamHandler(sys.stdout)
         ]
     )
-    logger = logging.getLogger()
-    sys.stdout = StreamToLogger(logger, logging.INFO)
-    logger.info("==========\nEvaluation Args:{}\n==========".format(args))
+    logging.info(f"Evaluation Args: {vars(args)}")
+
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     start_time = time.time()
-    logger.info("Starting evaluation")
+    logging.info("Starting evaluation")
+
+    # 构建数据集
     data_builder = DataBuilder_t2i(args, is_distributed=False)
     query_loader, gallery_loader = data_builder.build_data(is_train=False)
-    logger.info(f"Query data size: {len(query_loader.dataset.data)}, "
-                f"sample: {[(d[0], d[1], d[2], d[3]) for d in query_loader.dataset.data[:2]]}")
-    logger.info(f"Gallery data size: {len(gallery_loader.dataset.data)}, "
-                f"sample: {[(d[0], d[1], d[2], d[3]) for d in gallery_loader.dataset.data[:2]]}")
-    logger.info(f"Data loading time: {time.time() - start_time:.2f}s")
+    logging.info(f"Dataset loaded: Query={len(query_loader.dataset.data)}, "
+                 f"Gallery={len(gallery_loader.dataset.data)}, Time={time.time() - start_time:.2f}s")
 
-    net_config = args.model.copy()
-    net_config['num_classes'] = args.num_classes
-    model = T2IReIDModel(net_config=net_config)
-
+    # 初始化模型
+    model = T2IReIDModel(net_config=args.model)
     checkpoint = torch.load(args.checkpoint, map_location=device, weights_only=True)
-    if 'state_dict' in checkpoint:
-        state_dict = checkpoint['state_dict']
-    elif 'model' in checkpoint:
-        state_dict = checkpoint['model']
-    else:
-        state_dict = checkpoint
+    state_dict = checkpoint.get('state_dict', checkpoint.get('model', checkpoint))
 
-    if 'id_classifier.weight' in state_dict and state_dict['id_classifier.weight'].shape[0] != net_config[
-        'num_classes']:
-        logger.info(
-            f"Adapting id_classifier dimensions: checkpoint ({state_dict['id_classifier.weight'].shape[0]}) -> model ({net_config['num_classes']})")
-        state_dict['id_classifier.weight'] = state_dict['id_classifier.weight'][:net_config['num_classes'], :]
-        state_dict['id_classifier.bias'] = state_dict['id_classifier.bias'][:net_config['num_classes']]
+    # 调整分类器维度（优化：简化日志）
+    if 'id_classifier.weight' in state_dict and state_dict['id_classifier.weight'].shape[0] != args.model['num_classes']:
+        logging.info(f"Adapting id_classifier: {state_dict['id_classifier.weight'].shape[0]} -> {args.model['num_classes']}")
+        state_dict['id_classifier.weight'] = state_dict['id_classifier.weight'][:args.model['num_classes'], :]
+        state_dict['id_classifier.bias'] = state_dict['id_classifier.bias'][:args.model['num_classes']]
 
     model.load_state_dict(state_dict, strict=False)
     model = model.to(device)
 
-    evaluator = Evaluator_t2i(model, args=args)
-    metrics = evaluator.evaluate(
-        query_loader,
-        gallery_loader,
-        query_loader.dataset.data,
-        gallery_loader.dataset.data,
-        checkpoint_path=None
-    )
-    logger.info("评估结果 (capped at 1.0):")
-    logger.info(f"mAP:    {metrics['mAP']:.4f} ({metrics['mAP']*100:.2f}%)")
-    logger.info(f"Rank-1: {metrics['rank1']:.4f} ({metrics['rank1']*100:.2f}%)")
-    logger.info(f"Rank-5: {metrics['rank5']:.4f} ({metrics['rank5']*100:.2f}%)")
-    logger.info(f"Rank-10: {metrics['rank10']:.4f} ({metrics['rank10']*100:.2f}%)")
-    logger.info(f"Total evaluation time: {time.time() - start_time:.2f}s")
-    logger.info("Evaluation completed")
+    # 评估（优化：使用 torch.no_grad）
+    with torch.no_grad():
+        evaluator = Evaluator_t2i(model, args=args)
+        metrics = evaluator.evaluate(
+            query_loader, gallery_loader,
+            query_loader.dataset.data, gallery_loader.dataset.data,
+            checkpoint_path=None
+        )
+
+    # 记录指标
+    logging.info("Evaluation Results:")
+    logging.info(f"mAP:    {metrics['mAP']:.4f} ({metrics['mAP']*100:.2f}%)")
+    logging.info(f"Rank-1: {metrics['rank1']:.4f} ({metrics['rank1']*100:.2f}%)")
+    logging.info(f"Rank-5: {metrics['rank5']:.4f} ({metrics['rank5']*100:.2f}%)")
+    logging.info(f"Rank-10: {metrics['rank10']:.4f} ({metrics['rank10']*100:.2f}%)")
+    logging.info(f"Total evaluation time: {time.time() - start_time:.2f}s")
+    logging.info("Evaluation completed!")
 
 
 if __name__ == '__main__':

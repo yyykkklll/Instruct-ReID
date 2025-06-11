@@ -1,15 +1,14 @@
 import argparse
-import ast
-import gc
+import json
 import logging
 import random
 import sys
 from pathlib import Path
 
 import torch
-import yaml
 from torch.backends import cudnn
-from torch.cuda.amp import GradScaler  # Updated import for mixed precision
+from torch.cuda.amp import GradScaler
+import yaml
 
 # 定义项目根目录并添加到 sys.path
 ROOT_DIR = Path(__file__).parent.parent
@@ -24,7 +23,10 @@ from src.utils.lr_scheduler import WarmupMultiStepLR
 
 def configuration():
     """
-    解析命令行参数并加载 YAML 配置文件
+    解析命令行参数并加载 YAML 配置文件。
+
+    Returns:
+        tuple: (args, config)，命令行参数和配置文件
     """
     parser = argparse.ArgumentParser(description="Train T2I-ReID model")
     parser.add_argument('--config', default=str(ROOT_DIR / 'configs' / 'config_cuhk_pedes.yaml'),
@@ -59,20 +61,21 @@ def configuration():
     with config_path.open('r', encoding='utf-8') as f:
         config = yaml.safe_load(f)
 
-    # 将配置文件中的参数覆盖命令行默认值
+    # 覆盖命令行默认值
     for k, v in config.items():
         if not hasattr(args, k) or getattr(args, k) == parser.get_default(k):
             setattr(args, k, v)
 
-    # 处理数据集配置
+    # 处理数据集配置（优化：使用 json.loads 替代 ast.literal_eval）
     if args.dataset_configs:
         dataset_configs = []
         for cfg in args.dataset_configs:
-            parsed = ast.literal_eval(cfg)
-            if isinstance(parsed, list):
-                dataset_configs.extend(parsed)
-            else:
-                dataset_configs.append(parsed)
+            try:
+                parsed = json.loads(cfg)
+                dataset_configs.extend(parsed if isinstance(parsed, list) else [parsed])
+            except json.JSONDecodeError as e:
+                logging.error(f"Failed to parse dataset config: {cfg}, error: {e}")
+                raise
         args.dataset_configs = dataset_configs
     else:
         args.dataset_configs = [
@@ -99,96 +102,78 @@ def configuration():
             }
         ]
 
-    # 确保所有路径使用 Path 对象
-    args.bert_base_path = str(Path(args.bert_base_path))
-    args.vit_pretrained = str(Path(args.vit_pretrained))
-    args.logs_dir = str(Path(args.logs_dir))
-    args.root = str(Path(args.root))
-
-    # 验证路径有效性
-    if not Path(args.bert_base_path).exists():
-        raise FileNotFoundError(f"BERT base path not found at: {args.bert_base_path}")
-    if not Path(args.vit_pretrained).exists():
-        raise FileNotFoundError(f"ViT base path not found at: {args.vit_pretrained}")
+    # 统一路径为 Path 对象并验证（优化：合并路径检查）
+    paths_to_check = {
+        'bert_base_path': Path(args.bert_base_path),
+        'vit_pretrained': Path(args.vit_pretrained),
+        'logs_dir': Path(args.logs_dir),
+        'root': Path(args.root)
+    }
+    for name, path in paths_to_check.items():
+        if not path.exists():
+            raise FileNotFoundError(f"{name} not found at: {path}")
+        setattr(args, name, str(path))
 
     args.img_size = (args.height, args.width)
-    args.task_name = 't2i'
     return args, config
 
 
 class Runner:
     """
-    运行类，管理 T2I-ReID 模型的训练和评估
+    运行类，管理 T2I-ReID 模型的训练和评估。
     """
     def __init__(self, args, config):
         self.args = args
         self.config = config
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        # Initialize GradScaler for mixed precision training
-        if self.device.type == 'cuda':
-            self.scaler = GradScaler(enabled=args.fp16)
-        else:
-            self.scaler = None  # No scaler needed for CPU
-            if args.fp16:
-                logging.warning("FP16 is enabled but no CUDA device is available. Disabling mixed precision.")
+        self.scaler = GradScaler(enabled=args.fp16) if self.device.type == 'cuda' else None
+        if args.fp16 and self.device.type != 'cuda':
+            logging.warning("FP16 enabled but no CUDA device available. Disabling mixed precision.")
 
-    def build_optimizer(self, model):
-        params = [p for p in model.parameters() if p.requires_grad]
-        optimizer = torch.optim.Adam(params, lr=self.args.lr, weight_decay=self.args.weight_decay)
-        return optimizer
-
-    def build_scheduler(self, optimizer):
-        if self.args.scheduler == 'cosine':
-            return torch.optim.lr_scheduler.CosineAnnealingLR(
-                optimizer, T_max=self.args.epochs, eta_min=1e-6
-            )
-        else:
-            return WarmupMultiStepLR(
-                optimizer, self.args.milestones, gamma=0.1,
-                warmup_factor=0.1, warmup_iters=self.args.warmup_step
-            )
-
-    def load_param(self, model, trained_path):
-        param_dict = torch.load(trained_path, map_location=self.device, weights_only=True)
-        if 'state_dict' in param_dict:
-            param_dict = param_dict['state_dict']
-        elif 'model' in param_dict:
-            param_dict = param_dict['model']
-        model_dict = model.state_dict()
-        for i in param_dict:
-            if i in model_dict and model_dict[i].shape == param_dict[i].shape:
-                model_dict[i] = param_dict[i]
-        model.load_state_dict(model_dict, strict=False)
-
-    def run(self):
-        args = self.args
-        config = self.config
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-            gc.collect()
-
-        # 创建日志目录
+        # 提前创建日志目录（优化：避免运行时重复检查）
         Path(args.logs_dir).mkdir(parents=True, exist_ok=True)
-        log_file = Path(args.logs_dir) / 'log.txt'
         logging.basicConfig(
             level=logging.INFO,
             format='%(message)s',
             handlers=[
-                logging.FileHandler(log_file, mode='w'),
+                logging.FileHandler(Path(args.logs_dir) / 'log.txt', mode='w'),
                 logging.StreamHandler(sys.stdout)
             ]
         )
+
+    def build_optimizer(self, model):
+        params = [p for p in model.parameters() if p.requires_grad]
+        return torch.optim.Adam(params, lr=self.args.lr, weight_decay=self.args.weight_decay)
+
+    def build_scheduler(self, optimizer):
+        if getattr(self.args, 'scheduler', 'multistep') == 'cosine':
+            return torch.optim.lr_scheduler.CosineAnnealingLR(
+                optimizer, T_max=self.args.epochs, eta_min=1e-6
+            )
+        return WarmupMultiStepLR(
+            optimizer, self.args.milestones, gamma=0.1,
+            warmup_factor=0.1, warmup_iters=self.args.warmup_step
+        )
+
+    def load_param(self, model, trained_path):
+        """加载模型参数（优化：简化形状检查）"""
+        param_dict = torch.load(trained_path, map_location=self.device, weights_only=True)
+        param_dict = param_dict.get('state_dict', param_dict.get('model', param_dict))
+        model.load_state_dict(param_dict, strict=False)
+
+    def run(self):
+        args = self.args
+        config = self.config
 
         # 构建数据集
         data_builder = DataBuilder_t2i(args, is_distributed=False)
         args.num_classes = data_builder.get_num_classes()
         config['model']['num_classes'] = args.num_classes
-        logging.info(f"Set num_classes = {args.num_classes}")
+        logging.info(f"Number of classes: {args.num_classes}")
 
         train_loader, _ = data_builder.build_data(is_train=True)
         query_loader, gallery_loader = data_builder.build_data(is_train=False)
-        logging.info(f"Train data size: {len(train_loader.dataset.data)}")
-        logging.info(f"Query data size: {len(query_loader.dataset.data)}")
+        logging.info(f"Dataset sizes: Train={len(train_loader.dataset.data)}, Query={len(query_loader.dataset.data)}")
 
         # 初始化模型
         model = T2IReIDModel(net_config=config.get('model', {}))
@@ -212,16 +197,17 @@ class Runner:
             'lr_scheduler': lr_scheduler.state_dict(),
             'epoch': args.epochs
         }, fpath=str(checkpoint_path))
-        logging.info(f"Model saved at: {checkpoint_path}")
+        logging.info(f"Final checkpoint saved at: {checkpoint_path}")
 
-        # 评估模型
+        # 评估模型（优化：使用 torch.no_grad）
         from src.evaluation.evaluators_t import Evaluator_t2i
-        self.load_param(model, str(checkpoint_path))
-        evaluator = Evaluator_t2i(model, args=args)
-        metrics = evaluator.evaluate(
-            query_loader, gallery_loader, query_loader.dataset.data,
-            gallery_loader.dataset.data, checkpoint_path=str(checkpoint_path)
-        )
+        with torch.no_grad():
+            self.load_param(model, str(checkpoint_path))
+            evaluator = Evaluator_t2i(model, args=args)
+            metrics = evaluator.evaluate(
+                query_loader, gallery_loader, query_loader.dataset.data,
+                gallery_loader.dataset.data, checkpoint_path=str(checkpoint_path)
+            )
         logging.info(f"Evaluation Results: {metrics}")
 
 
